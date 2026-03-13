@@ -34,8 +34,8 @@ Direct play, HLS transcoding (1080p/720p/480p/360p), adaptive bitrate, session m
 ### Phase 3: Client UI -- COMPLETE (merged into Phase 2)
 Netflix-like browse, category rows, search, responsive layout, login/register.
 
-### Phase 4: Media Management
-TMDb metadata, subtitles (extract/search/upload), playlists.
+### Phase 4: Media Management -- COMPLETE
+TMDb metadata (auto-match on scan, manual match, batch scan, 30-day cache), subtitle extraction (FFmpeg VTT demux, bitmap codec skip), playlists (CRUD, ownership, reorder).
 
 ### Phase 5: Sharing & Federation
 Guest passes, server-to-server linking, remote browse/play.

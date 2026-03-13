@@ -11,11 +11,15 @@ import { registerAuthRoutes } from "./routes/auth.js";
 import { registerLibraryRoutes } from "./routes/library.js";
 import { registerProgressRoutes } from "./routes/progress.js";
 import { registerPlaybackRoutes } from "./routes/playback.js";
+import { registerMetadataRoutes } from "./routes/metadata.js";
+import { registerSubtitleRoutes } from "./routes/subtitles.js";
+import { registerPlaylistRoutes } from "./routes/playlists.js";
 import { destroyAllSessions } from "./streaming/session.js";
 
 const config = loadConfig();
 mkdirSync(config.dataDir, { recursive: true });
 mkdirSync(config.transcodeTmpDir, { recursive: true });
+mkdirSync(config.subtitleDir, { recursive: true });
 
 const db = getDatabase(config);
 initSchema(db);
@@ -49,6 +53,9 @@ registerAuthRoutes(app, db, config);
 registerLibraryRoutes(app, db, config);
 registerProgressRoutes(app, db, config);
 registerPlaybackRoutes(app, db, config);
+registerMetadataRoutes(app, db, config);
+registerSubtitleRoutes(app, db, config);
+registerPlaylistRoutes(app, db, config);
 
 app.setNotFoundHandler(async (request, reply) => {
   if (
@@ -57,7 +64,10 @@ app.setNotFoundHandler(async (request, reply) => {
     request.url.startsWith("/library/") ||
     request.url.startsWith("/admin/") ||
     request.url.startsWith("/progress/") ||
-    request.url.startsWith("/stream/")
+    request.url.startsWith("/stream/") ||
+    request.url.startsWith("/metadata/") ||
+    request.url.startsWith("/subtitles/") ||
+    request.url.startsWith("/playlists/")
   ) {
     return reply.code(404).send({ error: "Not found" });
   }

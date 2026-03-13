@@ -18,6 +18,10 @@ Server handles transcoding, metadata, subtitles. Client is a thin Preact shell s
 | `server/src/scanner/probe.ts` | FFprobe wrapper |
 | `server/src/streaming/transcoder.ts` | FFmpeg HLS pipeline |
 | `server/src/streaming/session.ts` | Stream session manager |
+| `server/src/metadata/tmdb.ts` | TMDb API client |
+| `server/src/metadata/matcher.ts` | Metadata auto-match + cache |
+| `server/src/subtitles/extract.ts` | FFmpeg subtitle extraction |
+| `server/src/media/playlists.ts` | Playlist CRUD + ownership |
 | `server/src/routes/*.ts` | API route handlers |
 
 ## Development

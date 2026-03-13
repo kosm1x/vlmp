@@ -5,7 +5,7 @@ import {
   useRef,
 } from "https://unpkg.com/preact@10/hooks/dist/hooks.module.js";
 import htm from "https://unpkg.com/htm@3?module";
-import { post, put, get, del } from "../api.js";
+import { post, put, get, del, getToken } from "../api.js";
 const html = htm.bind(h);
 
 function fmt(s) {
@@ -31,6 +31,8 @@ export function Player({ mediaId, onClose }) {
   const [muted, setMuted] = useState(false);
   const [speed, setSpeed] = useState(1);
   const [audioTracks, setAudioTracks] = useState([]);
+  const [subtitles, setSubtitles] = useState([]);
+  const [activeSubtitle, setActiveSubtitle] = useState(null);
   const [error, setError] = useState("");
   const [loading, setLoading] = useState(true);
 
@@ -50,6 +52,9 @@ export function Player({ mediaId, onClose }) {
         if (cancelled) return;
         setSession(sd);
         setAudioTracks(sd.audio_tracks || []);
+        // Fetch subtitles
+        const subs = await get(`/subtitles/${mediaId}`).catch(() => []);
+        if (!cancelled) setSubtitles(subs || []);
         const video = videoRef.current;
         if (!video) return;
         if (sd.mode === "direct") {
@@ -194,7 +199,18 @@ export function Player({ mediaId, onClose }) {
       }}
       onClick=${togglePlay}
       autoplay
-    />
+      crossorigin="anonymous"
+    >
+      ${subtitles.map(
+        (s) =>
+          html`<track
+            kind="subtitles"
+            src=${`/subtitles/${mediaId}/${s.id}/file?token=${encodeURIComponent(getToken())}`}
+            srclang=${s.language || "und"}
+            label=${s.label || s.language || "Unknown"}
+          />`,
+      )}
+    </video>
     ${loading &&
     html`<div class="loading" style=${{ position: "absolute", inset: 0 }}>
       Loading...
@@ -248,6 +264,30 @@ export function Player({ mediaId, onClose }) {
             (t, i) =>
               html`<option value=${i}>
                 ${t.language || "Track " + (i + 1)} (${t.codec})
+              </option>`,
+          )}
+        </select>`}
+        ${subtitles.length > 0 &&
+        html`<select
+          class="player-select"
+          value=${activeSubtitle || ""}
+          onChange=${(e) => {
+            const val = e.target.value;
+            setActiveSubtitle(val || null);
+            const video = videoRef.current;
+            if (video) {
+              for (let i = 0; i < video.textTracks.length; i++) {
+                video.textTracks[i].mode =
+                  video.textTracks[i].language === val ? "showing" : "hidden";
+              }
+            }
+          }}
+        >
+          <option value="">Subs Off</option>
+          ${subtitles.map(
+            (s) =>
+              html`<option value=${s.language || "und"}>
+                ${s.label || s.language || "Unknown"}
               </option>`,
           )}
         </select>`}
