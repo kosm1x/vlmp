@@ -18,6 +18,9 @@ Personal media server with a robust Node.js backend and an ultra-light Netflix-l
 - **Server federation** — Link VLMP instances to browse and play remote media, all proxied (NAT-safe)
 - **HMAC-SHA256 federation auth** — Shared secret signing with replay protection, invite-based linking
 - **Security hardened** — CSP, rate limiting, input validation, HMAC subtitle tokens, session ID validation
+- **Algorithmic recommendations** — 5-strategy engine (next episode, collaborative filtering, genre matching, similar items, popularity) with no external AI APIs
+- **User preferences** — Like/dislike with recommendation cache invalidation
+- **Library health dashboard** — 8 checks (missing files, zero-byte, metadata gaps, no subtitles, codec/resolution analysis, orphaned entries, duplicates) with admin cleanup
 - **Ultra-light client** — Preact + HTM loaded from CDN (~3KB framework), no build step
 - **Dark Netflix-like UI** — Responsive grid layout with category browsing, search, ARIA labels
 
@@ -83,7 +86,7 @@ vlmp/
 │   │   └── guest.ts          # Guest pass creation/validation
 │   ├── db/
 │   │   ├── index.ts          # SQLite singleton (WAL mode, FK enforcement)
-│   │   └── schema.ts         # 18 tables, 9 indexes
+│   │   └── schema.ts         # 21 tables, 14 indexes
 │   ├── scanner/
 │   │   ├── discover.ts       # Recursive file walker (22 video/audio formats)
 │   │   ├── classify.ts       # Folder-based categorization + filename parsing
@@ -110,6 +113,12 @@ vlmp/
 │   │   ├── client.ts         # Outbound signed fetch to peer servers
 │   │   ├── proxy.ts          # Library/stream proxy, M3U8 URL rewriting
 │   │   └── health.ts         # Heartbeat loop (5min, auto-offline after 3 failures)
+│   ├── ai/
+│   │   ├── viewing-log.ts    # Viewing history tracking with 5-min dedup
+│   │   ├── preferences.ts    # Like/dislike user preference CRUD
+│   │   ├── cache.ts          # TTL-based recommendation cache
+│   │   ├── recommender.ts    # 5-strategy recommendation engine
+│   │   └── health.ts         # Library health checks + orphan cleanup
 │   └── routes/
 │       ├── auth.ts           # Register, login, guest pass endpoints
 │       ├── library.ts        # Browse, search, TV shows, admin folder management
@@ -117,7 +126,9 @@ vlmp/
 │       ├── subtitles.ts      # Subtitle list, file serving, manual extraction
 │       ├── playlists.ts      # Playlist CRUD, item management, reorder
 │       ├── playback.ts       # Stream start, HLS manifests/segments, direct play
-│       ├── progress.ts       # Watch progress save/resume
+│       ├── progress.ts       # Watch progress save/resume, viewing log integration
+│       ├── recommendations.ts # Personalized recs, similar items, preferences
+│       ├── health.ts         # Admin library health report + cleanup
 │       ├── federation.ts     # Federation admin + proxy routes (JWT auth)
 │       └── federation-api.ts # Peer-facing federation API (HMAC auth)
 ├── client/public/
@@ -138,9 +149,10 @@ vlmp/
 │           ├── Player.js     # Video player (HLS.js, subtitles, seek, volume, speed, fullscreen)
 │           ├── Playlists.js  # Playlist list + create
 │           ├── PlaylistDetail.js # Single playlist view with items
-│           ├── Servers.js   # Federated server list, invite/link admin
-│           └── ServerBrowse.js # Remote library browser
-└── server/tests/             # 144 unit tests (vitest)
+│           ├── Servers.js    # Federated server list, invite/link admin
+│           ├── ServerBrowse.js # Remote library browser
+│           └── HealthDashboard.js # Admin library health dashboard
+└── server/tests/             # 176 unit tests (vitest)
 ```
 
 ## API Overview
@@ -215,6 +227,23 @@ vlmp/
 | PUT | `/progress/:mediaId` | Update watch position |
 | GET | `/progress/continue` | "Continue watching" list |
 
+### Recommendations & Preferences
+| Method | Endpoint | Description |
+|--------|----------|-------------|
+| GET | `/recommendations` | Personalized recommendations (cached 1hr) |
+| POST | `/recommendations/refresh` | Force recompute recommendations |
+| GET | `/recommendations/similar/:mediaId` | Similar items |
+| POST | `/preferences/:mediaId` | Set like/dislike preference |
+| DELETE | `/preferences/:mediaId` | Remove preference |
+| GET | `/preferences` | List user preferences |
+
+### Library Health (Admin)
+| Method | Endpoint | Description |
+|--------|----------|-------------|
+| GET | `/admin/health` | Full library health report |
+| GET | `/admin/health/missing` | Missing files list |
+| POST | `/admin/health/cleanup` | Remove orphaned database entries |
+
 ### Federation (Admin / Proxy)
 | Method | Endpoint | Auth | Description |
 |--------|----------|------|-------------|
@@ -285,7 +314,7 @@ VLMP classifies media by folder category. When adding a library folder, assign a
 
 SQLite with WAL journal mode for concurrent read/write. Tables include:
 
-`users`, `sessions`, `library_folders`, `media_items`, `tv_shows`, `seasons`, `episodes`, `doc_series`, `doc_series_episodes`, `guest_passes`, `watch_progress`, `playlists`, `playlist_items`, `subtitles`, `metadata_cache`, `federated_servers`, `federation_invites`, `schema_version`
+`users`, `sessions`, `library_folders`, `media_items`, `tv_shows`, `seasons`, `episodes`, `doc_series`, `doc_series_episodes`, `guest_passes`, `watch_progress`, `playlists`, `playlist_items`, `subtitles`, `metadata_cache`, `federated_servers`, `federation_invites`, `viewing_log`, `user_preferences`, `ai_cache`, `schema_version`
 
 Database file: `data/vlmp.db`
 
@@ -297,7 +326,7 @@ Database file: `data/vlmp.db`
 - [x] Phase 4 — Media Management (TMDb metadata, subtitles, playlists)
 - [x] Phase 5 — Federation (HMAC auth, server linking, remote browse/play, heartbeat)
 - [x] Phase 6 — Hardening (security headers, rate limiting, input validation, subtitle auth, a11y)
-- [ ] Phase 7 — AI Assistant (library health, recommendations)
+- [x] Phase 7 — AI Assistant (algorithmic recommendations, library health dashboard)
 
 ## License
 
