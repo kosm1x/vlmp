@@ -17,6 +17,7 @@
   "private": true,
   "dependencies": {
     "@fastify/cors": "^11.2.0",
+    "@fastify/rate-limit": "^10.3.0",
     "@fastify/static": "^9.0.0",
     "bcrypt": "^6.0.0",
     "better-sqlite3": "^12.6.2",
