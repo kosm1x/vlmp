@@ -15,6 +15,8 @@ Personal media server with a robust Node.js backend and an ultra-light Netflix-l
 - **Subtitle extraction** — Automatic VTT extraction from embedded subtitle tracks (FFmpeg)
 - **Playlists** — User-owned playlists with add/remove/reorder
 - **Media detail view** — Full detail page with backdrop, metadata, play button, subtitle list, playlist picker
+- **Server federation** — Link VLMP instances to browse and play remote media, all proxied (NAT-safe)
+- **HMAC-SHA256 federation auth** — Shared secret signing with replay protection, invite-based linking
 - **Ultra-light client** — Preact + HTM loaded from CDN (~3KB framework), no build step
 - **Dark Netflix-like UI** — Responsive grid layout with category browsing and search
 
@@ -52,6 +54,8 @@ All configuration is via environment variables:
 | `VLMP_FFMPEG_PATH` | `ffmpeg` | Path to FFmpeg binary |
 | `VLMP_FFPROBE_PATH` | `ffprobe` | Path to FFprobe binary |
 | `VLMP_TMDB_API_KEY` | *(empty)* | TMDb API key for metadata enrichment |
+| `VLMP_SERVER_NAME` | `VLMP` | Display name for this server in federation |
+| `VLMP_PUBLIC_URL` | *(empty)* | Public URL of this server (for federation linking) |
 
 ## Scripts
 
@@ -78,7 +82,7 @@ vlmp/
 │   │   └── guest.ts          # Guest pass creation/validation
 │   ├── db/
 │   │   ├── index.ts          # SQLite singleton (WAL mode, FK enforcement)
-│   │   └── schema.ts         # 17 tables, 8 indexes
+│   │   └── schema.ts         # 18 tables, 9 indexes
 │   ├── scanner/
 │   │   ├── discover.ts       # Recursive file walker (22 video/audio formats)
 │   │   ├── classify.ts       # Folder-based categorization + filename parsing
@@ -98,6 +102,13 @@ vlmp/
 │   │   ├── adaptive.ts       # 4 transcode profiles, bandwidth selection
 │   │   ├── transcoder.ts     # FFmpeg HLS pipeline (segments + playlists)
 │   │   └── session.ts        # In-memory session manager, idle timeout cleanup
+│   ├── federation/
+│   │   ├── crypto.ts         # HMAC-SHA256 signing, fingerprint, secrets
+│   │   ├── middleware.ts     # Federation auth preHandler (HMAC verification)
+│   │   ├── linking.ts        # Invite flow, server CRUD
+│   │   ├── client.ts         # Outbound signed fetch to peer servers
+│   │   ├── proxy.ts          # Library/stream proxy, M3U8 URL rewriting
+│   │   └── health.ts         # Heartbeat loop (5min, auto-offline after 3 failures)
 │   └── routes/
 │       ├── auth.ts           # Register, login, guest pass endpoints
 │       ├── library.ts        # Browse, search, TV shows, admin folder management
@@ -105,7 +116,9 @@ vlmp/
 │       ├── subtitles.ts      # Subtitle list, file serving, manual extraction
 │       ├── playlists.ts      # Playlist CRUD, item management, reorder
 │       ├── playback.ts       # Stream start, HLS manifests/segments, direct play
-│       └── progress.ts       # Watch progress save/resume
+│       ├── progress.ts       # Watch progress save/resume
+│       ├── federation.ts     # Federation admin + proxy routes (JWT auth)
+│       └── federation-api.ts # Peer-facing federation API (HMAC auth)
 ├── client/public/
 │   ├── index.html            # Entry point (CDN imports: Preact, HTM, HLS.js)
 │   ├── styles/main.css       # Dark theme, responsive layout
@@ -123,8 +136,10 @@ vlmp/
 │           ├── Search.js     # Search results grid
 │           ├── Player.js     # Video player (HLS.js, subtitles, seek, volume, speed, fullscreen)
 │           ├── Playlists.js  # Playlist list + create
-│           └── PlaylistDetail.js # Single playlist view with items
-└── server/tests/             # 86 unit tests (vitest)
+│           ├── PlaylistDetail.js # Single playlist view with items
+│           ├── Servers.js   # Federated server list, invite/link admin
+│           └── ServerBrowse.js # Remote library browser
+└── server/tests/             # 114 unit tests (vitest)
 ```
 
 ## API Overview
@@ -198,6 +213,51 @@ vlmp/
 | PUT | `/progress/:mediaId` | Update watch position |
 | GET | `/progress/continue` | "Continue watching" list |
 
+### Federation (Admin / Proxy)
+| Method | Endpoint | Auth | Description |
+|--------|----------|------|-------------|
+| GET | `/federation/servers` | JWT+admin | List linked servers |
+| POST | `/federation/invite` | JWT+admin | Generate invite token (1hr expiry) |
+| DELETE | `/federation/servers/:id` | JWT+admin | Remove a linked server |
+| POST | `/federation/link` | invite token | Receive link request from remote |
+| POST | `/federation/link-remote` | JWT+admin | Initiate link to another server |
+| GET | `/federation/servers/:id/library` | JWT | Browse remote library (proxied) |
+| GET | `/federation/servers/:id/media/:mediaId` | JWT | Remote media detail (proxied) |
+| GET | `/federation/servers/:id/tv/shows` | JWT | Remote TV shows (proxied) |
+| POST | `/federation/servers/:id/stream/:mediaId/start` | JWT | Start remote playback |
+| GET | `/federation/servers/:id/stream/:sessionId/*` | JWT | Proxy HLS content |
+| DELETE | `/federation/servers/:id/stream/:sessionId` | JWT | Stop remote playback |
+
+### Federation API (Peer-to-Peer, HMAC auth)
+| Method | Endpoint | Description |
+|--------|----------|-------------|
+| GET | `/federation/api/library` | Browse library (stripped) |
+| GET | `/federation/api/media/:id` | Media detail (stripped) |
+| GET | `/federation/api/tv/shows` | TV show list |
+| GET | `/federation/api/tv/shows/:id` | Show detail |
+| POST | `/federation/heartbeat` | Health ping |
+| POST | `/federation/api/stream/:id/start` | Start stream |
+| GET | `/federation/api/stream/:sessionId/*` | Serve HLS content |
+| DELETE | `/federation/api/stream/:sessionId` | Stop stream |
+
+## Federation
+
+Two VLMP instances can link up so users on Server A can browse and play media from Server B, all proxied through Server A (NAT-safe — the client never talks directly to remote servers).
+
+### How to Link Servers
+
+1. **Server B admin** goes to Servers page and clicks "Generate Invite Token"
+2. **Server A admin** enters Server B's URL + invite token in the "Link to Server" form
+3. Both servers now show as `active` — Server A's users can browse and play Server B's library
+
+### Architecture
+
+- **HMAC-SHA256 auth** — Every cross-server request signed with 3 headers (`X-VLMP-Server-Id`, `X-VLMP-Timestamp`, `X-VLMP-Signature`), with 300s replay window
+- **Proxy pattern** — All federation traffic proxied through local server; HLS playlist URLs rewritten to local proxy paths
+- **Sensitive field stripping** — `file_path`, `file_size`, `library_folder_id` removed from all remote responses
+- **Health monitoring** — 5-minute heartbeat loop; server marked offline after 3 consecutive failures, auto-recovers on next success
+- **Config** — Set `VLMP_SERVER_NAME` and `VLMP_PUBLIC_URL` env vars for federation
+
 ## Supported Formats
 
 **Video:** MKV, MP4, AVI, MOV, WMV, FLV, WebM, M4V, MPG, MPEG, TS, VOB, 3GP, OGV
@@ -223,7 +283,7 @@ VLMP classifies media by folder category. When adding a library folder, assign a
 
 SQLite with WAL journal mode for concurrent read/write. Tables include:
 
-`users`, `sessions`, `library_folders`, `media_items`, `tv_shows`, `seasons`, `episodes`, `doc_series`, `doc_series_episodes`, `guest_passes`, `watch_progress`, `playlists`, `playlist_items`, `subtitles`, `metadata_cache`, `federated_servers`, `schema_version`
+`users`, `sessions`, `library_folders`, `media_items`, `tv_shows`, `seasons`, `episodes`, `doc_series`, `doc_series_episodes`, `guest_passes`, `watch_progress`, `playlists`, `playlist_items`, `subtitles`, `metadata_cache`, `federated_servers`, `federation_invites`, `schema_version`
 
 Database file: `data/vlmp.db`
 
@@ -233,7 +293,7 @@ Database file: `data/vlmp.db`
 - [x] Phase 2 — Core Playback (direct play, HLS transcoding, player)
 - [x] Phase 3 — Client UI (Netflix-like browse, search, responsive)
 - [x] Phase 4 — Media Management (TMDb metadata, subtitles, playlists)
-- [ ] Phase 5 — Sharing & Federation (server linking, remote play)
+- [x] Phase 5 — Federation (HMAC auth, server linking, remote browse/play, heartbeat)
 - [ ] Phase 6 — Hardening (HTTPS, logging, security audit)
 - [ ] Phase 7 — AI Assistant (library health, recommendations)
 

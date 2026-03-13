@@ -37,8 +37,8 @@ Netflix-like browse, category rows, search, responsive layout, login/register.
 ### Phase 4: Media Management -- COMPLETE
 TMDb metadata (auto-match on scan, manual match, batch scan, 30-day cache), subtitle extraction (FFmpeg VTT demux, bitmap codec skip), playlists (CRUD, ownership, reorder).
 
-### Phase 5: Sharing & Federation
-Guest passes, server-to-server linking, remote browse/play.
+### Phase 5: Sharing & Federation -- COMPLETE
+HMAC-SHA256 server auth, 2-step invite linking, remote library browsing (proxied), remote HLS playback with M3U8 rewriting, 5-min heartbeat health monitoring. Zero new dependencies.
 
 ### Phase 6: Hardening & Polish
 Security audit, HTTPS, logging, config file, Windows service, docs.
