@@ -40,8 +40,8 @@ TMDb metadata (auto-match on scan, manual match, batch scan, 30-day cache), subt
 ### Phase 5: Sharing & Federation -- COMPLETE
 HMAC-SHA256 server auth, 2-step invite linking, remote library browsing (proxied), remote HLS playback with M3U8 rewriting, 5-min heartbeat health monitoring. Zero new dependencies.
 
-### Phase 6: Hardening & Polish
-Security audit, HTTPS, logging, config file, Windows service, docs.
+### Phase 6: Hardening & Polish -- COMPLETE
+Security headers (CSP, X-Frame-Options, nosniff, Referrer-Policy, Permissions-Policy), global rate limiting (120/min baseline), 1MB body limit, log redaction. Subtitle auth migrated from JWT-in-URL to short-lived HMAC tokens (5min TTL). Guest pass entropy doubled (64-bit), validation wrapped in transaction (TOCTOU fix), rate-limited. Fastify JSON schema validation on all POST/PUT routes. FFmpeg dash-prefix input validation. Federation browse routes restricted to admin. Startup config validation (port, publicUrl, TMDB key warning). Client: favicon, meta tags, ARIA labels, 404 route, error boundary, WCAG AA contrast fix.
 
 ### Phase 7: AI Assistant (post-MVP)
 Library health agent, recommendations, chat interface.

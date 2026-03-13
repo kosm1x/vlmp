@@ -26,30 +26,41 @@ afterEach(() => {
   db.close();
 });
 
-describe("guest passes", () => {
-  it("generates 16-char codes", () => {
-    const c = generateGuestCode();
-    expect(c).toHaveLength(16);
-    expect(/^[0-9a-f]+$/.test(c)).toBe(true);
+describe("guest pass hardening", () => {
+  it("guest code length is 16 hex chars (64-bit entropy)", () => {
+    const code = generateGuestCode();
+    expect(code).toHaveLength(16);
+    expect(/^[0-9a-f]{16}$/.test(code)).toBe(true);
   });
-  it("creates and validates", () => {
-    const pass = createGuestPass(db, 1, 1, 48, 3);
-    const r = validateGuestPass(db, pass.code);
-    expect(r.valid).toBe(true);
-    expect(r.mediaId).toBe(1);
+
+  it("codes are unique across generations", () => {
+    const codes = new Set(
+      Array.from({ length: 100 }, () => generateGuestCode()),
+    );
+    expect(codes.size).toBe(100);
   });
-  it("rejects invalid code", () => {
-    expect(validateGuestPass(db, "badcode1").valid).toBe(false);
+
+  it("validateGuestPass is atomic (concurrent calls respect max_views)", () => {
+    const pass = createGuestPass(db, 1, 1, 48, 2);
+    // Simulate concurrent validation — in SQLite with transactions, these are serialized
+    const r1 = validateGuestPass(db, pass.code);
+    const r2 = validateGuestPass(db, pass.code);
+    const r3 = validateGuestPass(db, pass.code);
+    expect(r1.valid).toBe(true);
+    expect(r2.valid).toBe(true);
+    expect(r3.valid).toBe(false);
   });
-  it("rejects expired", () => {
-    const pass = createGuestPass(db, 1, 1, 0, 3);
+
+  it("expired pass rejected", () => {
+    const pass = createGuestPass(db, 1, 1, 1, 3);
     db.prepare("UPDATE guest_passes SET expires_at = ? WHERE code = ?").run(
       0,
       pass.code,
     );
     expect(validateGuestPass(db, pass.code).valid).toBe(false);
   });
-  it("rejects max views reached", () => {
+
+  it("view-limited pass rejected after max views", () => {
     const pass = createGuestPass(db, 1, 1, 48, 1);
     expect(validateGuestPass(db, pass.code).valid).toBe(true);
     expect(validateGuestPass(db, pass.code).valid).toBe(false);

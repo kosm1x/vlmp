@@ -167,13 +167,13 @@ export function registerFederationRoutes(
       | undefined;
   };
 
-  // Browse remote library
+  // Browse remote library (admin only)
   app.get<{
     Params: { serverId: string };
     Querystring: Record<string, string>;
   }>(
     "/federation/servers/:serverId/library",
-    { preHandler: auth },
+    { preHandler: [auth, adminOnly] },
     async (request, reply) => {
       const server = getServer(request.params.serverId);
       if (!server)
@@ -189,10 +189,10 @@ export function registerFederationRoutes(
     },
   );
 
-  // Remote media detail
+  // Remote media detail (admin only)
   app.get<{ Params: { serverId: string; mediaId: string } }>(
     "/federation/servers/:serverId/media/:mediaId",
-    { preHandler: auth },
+    { preHandler: [auth, adminOnly] },
     async (request, reply) => {
       const server = getServer(request.params.serverId);
       if (!server)
@@ -211,10 +211,10 @@ export function registerFederationRoutes(
     },
   );
 
-  // Remote TV shows
+  // Remote TV shows (admin only)
   app.get<{ Params: { serverId: string } }>(
     "/federation/servers/:serverId/tv/shows",
-    { preHandler: auth },
+    { preHandler: [auth, adminOnly] },
     async (request, reply) => {
       const server = getServer(request.params.serverId);
       if (!server)

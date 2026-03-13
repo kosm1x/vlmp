@@ -4,7 +4,10 @@ import { resolve } from "node:path";
 import { createReadStream, existsSync } from "node:fs";
 import type { Config } from "../config.js";
 import { authMiddleware, adminOnly } from "../auth/middleware.js";
-import { verifyToken } from "../auth/jwt.js";
+import {
+  generateSubtitleToken,
+  validateSubtitleToken,
+} from "../subtitles/tokens.js";
 import {
   getSubtitlesForMedia,
   persistSubtitles,
@@ -29,20 +32,34 @@ export function registerSubtitleRoutes(
     },
   );
 
+  // Generate a short-lived HMAC token for subtitle file access
+  app.get<{ Params: { mediaId: string; subtitleId: string } }>(
+    "/subtitles/:mediaId/:subtitleId/token",
+    { preHandler: auth },
+    async (request) => {
+      return generateSubtitleToken(
+        config.jwtSecret,
+        request.params.subtitleId,
+        request.params.mediaId,
+      );
+    },
+  );
+
+  // Serve subtitle file using HMAC token (no JWT in URL)
   app.get<{
     Params: { mediaId: string; subtitleId: string };
     Querystring: { token?: string };
   }>("/subtitles/:mediaId/:subtitleId/file", async (request, reply) => {
-    // Auth via header OR query param (for <track> elements that can't set headers)
-    const token =
-      request.headers.authorization?.replace("Bearer ", "") ||
-      request.query.token;
+    const token = request.query.token;
     if (!token) return reply.code(401).send({ error: "Unauthorized" });
-    try {
-      await verifyToken(token, config);
-    } catch {
-      return reply.code(401).send({ error: "Invalid token" });
-    }
+    const valid = validateSubtitleToken(
+      config.jwtSecret,
+      request.params.subtitleId,
+      request.params.mediaId,
+      token,
+    );
+    if (!valid)
+      return reply.code(401).send({ error: "Invalid or expired token" });
     const subtitleId = parseInt(request.params.subtitleId, 10);
     const sub = db
       .prepare("SELECT * FROM subtitles WHERE id = ?")

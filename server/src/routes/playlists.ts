@@ -27,12 +27,21 @@ export function registerPlaylistRoutes(
 
   app.post<{ Body: { name: string } }>(
     "/playlists",
-    { preHandler: auth },
+    {
+      schema: {
+        body: {
+          type: "object",
+          required: ["name"],
+          properties: {
+            name: { type: "string", minLength: 1, maxLength: 200 },
+          },
+          additionalProperties: false,
+        },
+      },
+      preHandler: auth,
+    },
     async (request, reply) => {
-      const { name } = request.body || {};
-      if (!name || !name.trim()) {
-        return reply.code(400).send({ error: "Name required" });
-      }
+      const { name } = request.body;
       const userId = parseInt(request.user!.sub, 10);
       return reply.code(201).send(createPlaylist(db, userId, name.trim()));
     },
@@ -56,12 +65,21 @@ export function registerPlaylistRoutes(
 
   app.put<{ Params: { id: string }; Body: { name: string } }>(
     "/playlists/:id",
-    { preHandler: auth },
+    {
+      schema: {
+        body: {
+          type: "object",
+          required: ["name"],
+          properties: {
+            name: { type: "string", minLength: 1, maxLength: 200 },
+          },
+          additionalProperties: false,
+        },
+      },
+      preHandler: auth,
+    },
     async (request, reply) => {
-      const { name } = request.body || {};
-      if (!name || !name.trim()) {
-        return reply.code(400).send({ error: "Name required" });
-      }
+      const { name } = request.body;
       const userId = parseInt(request.user!.sub, 10);
       const updated = renamePlaylist(
         db,
@@ -93,11 +111,19 @@ export function registerPlaylistRoutes(
 
   app.post<{ Params: { id: string }; Body: { media_id: number } }>(
     "/playlists/:id/items",
-    { preHandler: auth },
+    {
+      schema: {
+        body: {
+          type: "object",
+          required: ["media_id"],
+          properties: { media_id: { type: "number" } },
+          additionalProperties: false,
+        },
+      },
+      preHandler: auth,
+    },
     async (request, reply) => {
-      const { media_id } = request.body || {};
-      if (!media_id)
-        return reply.code(400).send({ error: "media_id required" });
+      const { media_id } = request.body;
       const userId = parseInt(request.user!.sub, 10);
       const item = addToPlaylist(
         db,
@@ -128,12 +154,21 @@ export function registerPlaylistRoutes(
 
   app.put<{ Params: { id: string }; Body: { item_ids: number[] } }>(
     "/playlists/:id/reorder",
-    { preHandler: auth },
+    {
+      schema: {
+        body: {
+          type: "object",
+          required: ["item_ids"],
+          properties: {
+            item_ids: { type: "array", items: { type: "number" } },
+          },
+          additionalProperties: false,
+        },
+      },
+      preHandler: auth,
+    },
     async (request, reply) => {
-      const { item_ids } = request.body || {};
-      if (!item_ids || !Array.isArray(item_ids)) {
-        return reply.code(400).send({ error: "item_ids array required" });
-      }
+      const { item_ids } = request.body;
       const userId = parseInt(request.user!.sub, 10);
       const reordered = reorderPlaylist(
         db,

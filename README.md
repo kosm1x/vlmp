@@ -17,8 +17,9 @@ Personal media server with a robust Node.js backend and an ultra-light Netflix-l
 - **Media detail view** — Full detail page with backdrop, metadata, play button, subtitle list, playlist picker
 - **Server federation** — Link VLMP instances to browse and play remote media, all proxied (NAT-safe)
 - **HMAC-SHA256 federation auth** — Shared secret signing with replay protection, invite-based linking
+- **Security hardened** — CSP, rate limiting, input validation, HMAC subtitle tokens, session ID validation
 - **Ultra-light client** — Preact + HTM loaded from CDN (~3KB framework), no build step
-- **Dark Netflix-like UI** — Responsive grid layout with category browsing and search
+- **Dark Netflix-like UI** — Responsive grid layout with category browsing, search, ARIA labels
 
 ## Requirements
 
@@ -139,7 +140,7 @@ vlmp/
 │           ├── PlaylistDetail.js # Single playlist view with items
 │           ├── Servers.js   # Federated server list, invite/link admin
 │           └── ServerBrowse.js # Remote library browser
-└── server/tests/             # 114 unit tests (vitest)
+└── server/tests/             # 144 unit tests (vitest)
 ```
 
 ## API Overview
@@ -182,7 +183,8 @@ vlmp/
 | Method | Endpoint | Description |
 |--------|----------|-------------|
 | GET | `/subtitles/:mediaId` | List subtitles for media item |
-| GET | `/subtitles/:mediaId/:subtitleId/file` | Serve VTT file |
+| GET | `/subtitles/:mediaId/:subtitleId/token` | Get short-lived HMAC token for file access |
+| GET | `/subtitles/:mediaId/:subtitleId/file` | Serve VTT file (HMAC token in query) |
 
 ### Playlists
 | Method | Endpoint | Description |
@@ -221,9 +223,9 @@ vlmp/
 | DELETE | `/federation/servers/:id` | JWT+admin | Remove a linked server |
 | POST | `/federation/link` | invite token | Receive link request from remote |
 | POST | `/federation/link-remote` | JWT+admin | Initiate link to another server |
-| GET | `/federation/servers/:id/library` | JWT | Browse remote library (proxied) |
-| GET | `/federation/servers/:id/media/:mediaId` | JWT | Remote media detail (proxied) |
-| GET | `/federation/servers/:id/tv/shows` | JWT | Remote TV shows (proxied) |
+| GET | `/federation/servers/:id/library` | JWT+admin | Browse remote library (proxied) |
+| GET | `/federation/servers/:id/media/:mediaId` | JWT+admin | Remote media detail (proxied) |
+| GET | `/federation/servers/:id/tv/shows` | JWT+admin | Remote TV shows (proxied) |
 | POST | `/federation/servers/:id/stream/:mediaId/start` | JWT | Start remote playback |
 | GET | `/federation/servers/:id/stream/:sessionId/*` | JWT | Proxy HLS content |
 | DELETE | `/federation/servers/:id/stream/:sessionId` | JWT | Stop remote playback |
@@ -294,7 +296,7 @@ Database file: `data/vlmp.db`
 - [x] Phase 3 — Client UI (Netflix-like browse, search, responsive)
 - [x] Phase 4 — Media Management (TMDb metadata, subtitles, playlists)
 - [x] Phase 5 — Federation (HMAC auth, server linking, remote browse/play, heartbeat)
-- [ ] Phase 6 — Hardening (HTTPS, logging, security audit)
+- [x] Phase 6 — Hardening (security headers, rate limiting, input validation, subtitle auth, a11y)
 - [ ] Phase 7 — AI Assistant (library health, recommendations)
 
 ## License

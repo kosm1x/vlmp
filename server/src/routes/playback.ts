@@ -38,6 +38,12 @@ function getMediaById(db: Database.Database, id: number): MediaRow | undefined {
     .get(id) as MediaRow | undefined;
 }
 
+const SESSION_ID_PATTERN = /^[a-f0-9-]{36}$/;
+
+function validateSessionId(sessionId: string): boolean {
+  return SESSION_ID_PATTERN.test(sessionId);
+}
+
 export function registerPlaybackRoutes(
   app: FastifyInstance,
   db: Database.Database,
@@ -52,46 +58,65 @@ export function registerPlaybackRoutes(
       start_time?: number;
       audio_track?: number;
     };
-  }>("/stream/:id/start", { preHandler: auth }, async (request, reply) => {
-    const mediaId = parseInt(request.params.id, 10);
-    const media = getMediaById(db, mediaId);
-    if (!media) return reply.code(404).send({ error: "Media not found" });
-    if (!existsSync(media.file_path))
-      return reply.code(404).send({ error: "Media file not found on disk" });
-    const ext = extname(media.file_path).toLowerCase();
-    const direct = canDirectPlay(media.codec_video, media.codec_audio, ext);
-    const profiles = direct
-      ? []
-      : getAvailableProfiles(media.resolution_width, media.resolution_height);
-    const session = createSession(
-      mediaId,
-      media.file_path,
-      request.user!.sub,
-      profiles,
-      direct,
-    );
-    if (direct)
+  }>(
+    "/stream/:id/start",
+    {
+      schema: {
+        body: {
+          type: "object",
+          properties: {
+            start_time: { type: "number", minimum: 0 },
+            audio_track: { type: "number", minimum: 0 },
+            bandwidth_kbps: { type: "number", minimum: 0 },
+          },
+          additionalProperties: false,
+        },
+      },
+      preHandler: auth,
+    },
+    async (request, reply) => {
+      const mediaId = parseInt(request.params.id, 10);
+      const media = getMediaById(db, mediaId);
+      if (!media) return reply.code(404).send({ error: "Media not found" });
+      if (!existsSync(media.file_path))
+        return reply.code(404).send({ error: "Media file not found on disk" });
+      const ext = extname(media.file_path).toLowerCase();
+      const direct = canDirectPlay(media.codec_video, media.codec_audio, ext);
+      const profiles = direct
+        ? []
+        : getAvailableProfiles(media.resolution_width, media.resolution_height);
+      const session = createSession(
+        mediaId,
+        media.file_path,
+        request.user!.sub,
+        profiles,
+        direct,
+      );
+      if (direct)
+        return reply.send({
+          session_id: session.id,
+          mode: "direct",
+          url: `/stream/${session.id}/direct`,
+          duration: media.duration,
+          audio_tracks: media.audio_tracks
+            ? JSON.parse(media.audio_tracks)
+            : [],
+        });
+      for (const profile of profiles)
+        startProfileTranscode(session, profile.name, config, {
+          startTime: request.body.start_time,
+          audioTrack: request.body.audio_track,
+        });
       return reply.send({
         session_id: session.id,
-        mode: "direct",
-        url: `/stream/${session.id}/direct`,
+        mode: "transcode",
+        url: `/stream/${session.id}/master.m3u8`,
+        profiles: profiles.map((p) => p.name),
         duration: media.duration,
         audio_tracks: media.audio_tracks ? JSON.parse(media.audio_tracks) : [],
       });
-    for (const profile of profiles)
-      startProfileTranscode(session, profile.name, config, {
-        startTime: request.body.start_time,
-        audioTrack: request.body.audio_track,
-      });
-    return reply.send({
-      session_id: session.id,
-      mode: "transcode",
-      url: `/stream/${session.id}/master.m3u8`,
-      profiles: profiles.map((p) => p.name),
-      duration: media.duration,
-      audio_tracks: media.audio_tracks ? JSON.parse(media.audio_tracks) : [],
-    });
-  });
+    },
+  );
 
   app.post<{ Params: { code: string }; Body: { bandwidth_kbps?: number } }>(
     "/stream/guest/:code/start",
@@ -133,6 +158,8 @@ export function registerPlaybackRoutes(
   app.get<{ Params: { sessionId: string } }>(
     "/stream/:sessionId/master.m3u8",
     async (request, reply) => {
+      if (!validateSessionId(request.params.sessionId))
+        return reply.code(400).send({ error: "Invalid session ID format" });
       const session = getSession(request.params.sessionId);
       if (!session) return reply.code(404).send({ error: "Session not found" });
       return reply
@@ -144,6 +171,8 @@ export function registerPlaybackRoutes(
   app.get<{ Params: { sessionId: string; profile: string } }>(
     "/stream/:sessionId/:profile/playlist.m3u8",
     async (request, reply) => {
+      if (!validateSessionId(request.params.sessionId))
+        return reply.code(400).send({ error: "Invalid session ID format" });
       const session = getSession(request.params.sessionId);
       if (!session) return reply.code(404).send({ error: "Session not found" });
       const job = session.jobs.get(request.params.profile);
@@ -162,6 +191,8 @@ export function registerPlaybackRoutes(
   app.get<{ Params: { sessionId: string; profile: string; segment: string } }>(
     "/stream/:sessionId/:profile/:segment",
     async (request, reply) => {
+      if (!validateSessionId(request.params.sessionId))
+        return reply.code(400).send({ error: "Invalid session ID format" });
       const session = getSession(request.params.sessionId);
       if (!session) return reply.code(404).send({ error: "Session not found" });
       const job = session.jobs.get(request.params.profile);
@@ -190,6 +221,8 @@ export function registerPlaybackRoutes(
   app.get<{ Params: { sessionId: string } }>(
     "/stream/:sessionId/direct",
     async (request, reply) => {
+      if (!validateSessionId(request.params.sessionId))
+        return reply.code(400).send({ error: "Invalid session ID format" });
       const session = getSession(request.params.sessionId);
       if (!session || !session.directPlay)
         return reply
@@ -203,6 +236,8 @@ export function registerPlaybackRoutes(
     "/stream/:sessionId",
     { preHandler: auth },
     async (request, reply) => {
+      if (!validateSessionId(request.params.sessionId))
+        return reply.code(400).send({ error: "Invalid session ID format" });
       const session = getSession(request.params.sessionId);
       if (!session) return reply.code(404).send({ error: "Session not found" });
       if (session.userId !== "guest" && session.userId !== request.user!.sub) {

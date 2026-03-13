@@ -30,7 +30,20 @@ config.serverFingerprint = loadOrGenerateFingerprint(config.dataDir);
 const db = getDatabase(config);
 initSchema(db);
 
-const app = Fastify({ logger: true });
+const app = Fastify({
+  logger: {
+    serializers: {
+      req(request: { method: string; url: string; hostname: string }) {
+        return {
+          method: request.method,
+          url: request.url.replace(/token=[^&]+/g, "token=REDACTED"),
+          hostname: request.hostname,
+        };
+      },
+    },
+  },
+  bodyLimit: 1_048_576,
+});
 
 if (config.jwtSecret === "vlmp-dev-secret-change-me") {
   if (process.env.NODE_ENV === "production") {
@@ -46,13 +59,34 @@ await app.register(cors, {
   origin:
     process.env.VLMP_CORS_ORIGIN?.split(",").map((s) => s.trim()) || false,
 });
-await app.register(rateLimit, { global: false });
+await app.register(rateLimit, {
+  global: true,
+  max: 120,
+  timeWindow: "1 minute",
+});
 
 const clientDir = resolve(import.meta.dirname, "../../client/public");
 await app.register(fastifyStatic, {
   root: clientDir,
   prefix: "/",
   wildcard: false,
+});
+
+app.addHook("onSend", async (_request, reply, payload) => {
+  const ct = reply.getHeader("content-type") as string | undefined;
+  if (ct && ct.includes("video/mp2t")) return payload;
+  reply.header(
+    "Content-Security-Policy",
+    "default-src 'self'; script-src 'self' https://esm.sh https://cdn.jsdelivr.net https://unpkg.com 'unsafe-inline'; style-src 'self' 'unsafe-inline'; img-src 'self' https://image.tmdb.org data:; media-src 'self' blob:; connect-src 'self'; frame-ancestors 'none'",
+  );
+  reply.header("X-Frame-Options", "DENY");
+  reply.header("X-Content-Type-Options", "nosniff");
+  reply.header("Referrer-Policy", "strict-origin-when-cross-origin");
+  reply.header(
+    "Permissions-Policy",
+    "camera=(), microphone=(), geolocation=()",
+  );
+  return payload;
 });
 
 registerAuthRoutes(app, db, config);

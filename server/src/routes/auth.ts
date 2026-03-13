@@ -19,8 +19,8 @@ export function registerAuthRoutes(
           type: "object",
           required: ["username", "password"],
           properties: {
-            username: { type: "string", minLength: 3 },
-            password: { type: "string", minLength: 8 },
+            username: { type: "string", minLength: 3, maxLength: 50 },
+            password: { type: "string", minLength: 8, maxLength: 128 },
           },
           additionalProperties: false,
         },
@@ -131,6 +131,7 @@ export function registerAuthRoutes(
 
   app.get<{ Params: { code: string } }>(
     "/auth/guest/:code",
+    { config: { rateLimit: { max: 10, timeWindow: "1 minute" } } },
     async (request, reply) => {
       const result = validateGuestPass(db, request.params.code);
       if (!result.valid)

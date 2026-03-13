@@ -17,6 +17,23 @@ import { PlaylistDetail } from "./components/PlaylistDetail.js";
 import { Servers } from "./components/Servers.js";
 import { ServerBrowse } from "./components/ServerBrowse.js";
 const html = htm.bind(h);
+
+function NotFound() {
+  return html`<div class="empty" style=${{ paddingTop: "120px" }}>
+    <h2>Page not found</h2>
+    <p>The page you're looking for doesn't exist.</p>
+    <a
+      href="#/"
+      style=${{
+        color: "var(--accent)",
+        marginTop: "1rem",
+        display: "inline-block",
+      }}
+      >Go home</a
+    >
+  </div>`;
+}
+
 function App() {
   const [route, setRoute] = useState(getRoute());
   const [loggedIn, setLoggedIn] = useState(isLoggedIn());
@@ -72,10 +89,31 @@ function App() {
         content = html`<${ServerBrowse} serverId=${pathParts[1]} />`;
       else content = html`<${Servers} />`;
       break;
-    default:
-      content = html`<${Browse} category=${pathParts[0] || null} />`;
+    default: {
+      const knownCategories = [
+        undefined,
+        "movies",
+        "tv",
+        "documentaries",
+        "education",
+        "doc_series",
+        "other",
+      ];
+      if (!pathParts[0] || knownCategories.includes(pathParts[0]))
+        content = html`<${Browse} category=${pathParts[0] || null} />`;
+      else content = html`<${NotFound} />`;
       break;
+    }
   }
   return html`<${Shell}>${content}</${Shell}>`;
 }
-render(html`<${App} />`, document.getElementById("app"));
+try {
+  render(html`<${App} />`, document.getElementById("app"));
+} catch (err) {
+  document.getElementById("app").innerHTML = `
+    <div style="display:flex;align-items:center;justify-content:center;min-height:100vh;flex-direction:column;gap:1rem;color:#e5e5e5">
+      <h2>Something went wrong</h2>
+      <p style="color:#808080">${err.message || "An unexpected error occurred"}</p>
+      <button onclick="location.reload()" style="padding:.6rem 1.25rem;background:#e50914;border:none;border-radius:4px;color:#fff;font-size:.9rem;cursor:pointer">Reload</button>
+    </div>`;
+}

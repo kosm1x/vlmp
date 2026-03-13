@@ -5,7 +5,7 @@ import {
   useRef,
 } from "https://unpkg.com/preact@10/hooks/dist/hooks.module.js";
 import htm from "https://unpkg.com/htm@3?module";
-import { post, put, get, del, getToken } from "../api.js";
+import { post, put, get, del } from "../api.js";
 const html = htm.bind(h);
 
 function fmt(s) {
@@ -63,10 +63,20 @@ export function Player({ mediaId, onClose, serverId, federated }) {
         if (cancelled) return;
         setSession(sd);
         setAudioTracks(sd.audio_tracks || []);
-        // Fetch subtitles (local only)
+        // Fetch subtitles with HMAC tokens (local only)
         if (!federated) {
           const subs = await get(`/subtitles/${mediaId}`).catch(() => []);
-          if (!cancelled) setSubtitles(subs || []);
+          if (!cancelled && subs && subs.length > 0) {
+            const subsWithTokens = await Promise.all(
+              subs.map(async (s) => {
+                const { token } = await get(
+                  `/subtitles/${mediaId}/${s.id}/token`,
+                ).catch(() => ({ token: null }));
+                return { ...s, hmacToken: token };
+              }),
+            );
+            if (!cancelled) setSubtitles(subsWithTokens);
+          }
         }
         const video = videoRef.current;
         if (!video) return;
@@ -221,9 +231,10 @@ export function Player({ mediaId, onClose, serverId, federated }) {
     >
       ${subtitles.map(
         (s) =>
+          s.hmacToken &&
           html`<track
             kind="subtitles"
-            src=${`/subtitles/${mediaId}/${s.id}/file?token=${encodeURIComponent(getToken())}`}
+            src=${`/subtitles/${mediaId}/${s.id}/file?token=${encodeURIComponent(s.hmacToken)}`}
             srclang=${s.language || "und"}
             label=${s.label || s.language || "Unknown"}
           />`,
@@ -242,19 +253,29 @@ export function Player({ mediaId, onClose, serverId, federated }) {
         step="0.1"
         value=${currentTime}
         onInput=${seek}
+        aria-label="Seek"
       />
       <div class="player-buttons">
-        <button class="player-btn" onClick=${togglePlay}>
+        <button
+          class="player-btn"
+          onClick=${togglePlay}
+          aria-label=${playing ? "Pause" : "Play"}
+        >
           ${playing ? "\u23F8" : "\u25B6"}
         </button>
         <button
           class="player-btn"
           onClick=${restart}
           title="Start from beginning"
+          aria-label="Restart from beginning"
         >
           ⏮
         </button>
-        <button class="player-btn" onClick=${toggleMute}>
+        <button
+          class="player-btn"
+          onClick=${toggleMute}
+          aria-label=${muted ? "Unmute" : "Mute"}
+        >
           ${muted ? "\uD83D\uDD07" : "\uD83D\uDD0A"}
         </button>
         <input
@@ -264,6 +285,7 @@ export function Player({ mediaId, onClose, serverId, federated }) {
           step="0.05"
           value=${volume}
           onInput=${changeVol}
+          aria-label="Volume"
           style=${{ width: "80px", accentColor: "#e50914" }}
         />
         <span class="player-time">${fmt(currentTime)} / ${fmt(duration)}</span>
@@ -309,7 +331,13 @@ export function Player({ mediaId, onClose, serverId, federated }) {
               </option>`,
           )}
         </select>`}
-        <button class="player-btn" onClick=${toggleFs}>⛶</button>
+        <button
+          class="player-btn"
+          onClick=${toggleFs}
+          aria-label="Toggle fullscreen"
+        >
+          ⛶
+        </button>
       </div>
     </div>
   </div>`;
