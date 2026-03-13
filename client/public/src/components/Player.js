@@ -18,7 +18,7 @@ function fmt(s) {
     : `${m}:${String(sec).padStart(2, "0")}`;
 }
 
-export function Player({ mediaId, onClose }) {
+export function Player({ mediaId, onClose, serverId, federated }) {
   const videoRef = useRef(null);
   const hlsRef = useRef(null);
   const progressTimer = useRef(null);
@@ -40,21 +40,34 @@ export function Player({ mediaId, onClose }) {
     let cancelled = false;
     async function init() {
       try {
-        const [mediaData, progress] = await Promise.all([
-          get(`/library/${mediaId}`),
-          get(`/progress/${mediaId}`).catch(() => ({ position_seconds: 0 })),
-        ]);
+        let mediaData, progress;
+        if (federated) {
+          [mediaData, progress] = await Promise.all([
+            get(`/federation/servers/${serverId}/media/${mediaId}`),
+            Promise.resolve({ position_seconds: 0 }),
+          ]);
+        } else {
+          [mediaData, progress] = await Promise.all([
+            get(`/library/${mediaId}`),
+            get(`/progress/${mediaId}`).catch(() => ({ position_seconds: 0 })),
+          ]);
+        }
         if (cancelled) return;
         setMedia(mediaData);
-        const sd = await post(`/stream/${mediaId}/start`, {
+        const streamUrl = federated
+          ? `/federation/servers/${serverId}/stream/${mediaId}/start`
+          : `/stream/${mediaId}/start`;
+        const sd = await post(streamUrl, {
           start_time: progress.position_seconds || 0,
         });
         if (cancelled) return;
         setSession(sd);
         setAudioTracks(sd.audio_tracks || []);
-        // Fetch subtitles
-        const subs = await get(`/subtitles/${mediaId}`).catch(() => []);
-        if (!cancelled) setSubtitles(subs || []);
+        // Fetch subtitles (local only)
+        if (!federated) {
+          const subs = await get(`/subtitles/${mediaId}`).catch(() => []);
+          if (!cancelled) setSubtitles(subs || []);
+        }
         const video = videoRef.current;
         if (!video) return;
         if (sd.mode === "direct") {
@@ -158,7 +171,12 @@ export function Player({ mediaId, onClose }) {
         position_seconds: v.currentTime,
         duration_seconds: v.duration || 0,
       }).catch(() => {});
-    if (session) del(`/stream/${session.session_id}`).catch(() => {});
+    if (session) {
+      const stopUrl = federated
+        ? `/federation/servers/${serverId}/stream/${session.session_id}`
+        : `/stream/${session.session_id}`;
+      del(stopUrl).catch(() => {});
+    }
     onClose();
   }
 

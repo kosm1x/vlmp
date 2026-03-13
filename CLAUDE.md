@@ -22,6 +22,12 @@ Server handles transcoding, metadata, subtitles. Client is a thin Preact shell s
 | `server/src/metadata/matcher.ts` | Metadata auto-match + cache |
 | `server/src/subtitles/extract.ts` | FFmpeg subtitle extraction |
 | `server/src/media/playlists.ts` | Playlist CRUD + ownership |
+| `server/src/federation/crypto.ts` | HMAC-SHA256 signing + fingerprint |
+| `server/src/federation/middleware.ts` | Federation HMAC auth preHandler |
+| `server/src/federation/linking.ts` | Server linking (invite flow) |
+| `server/src/federation/client.ts` | Outbound signed fetch to peers |
+| `server/src/federation/proxy.ts` | Library/stream proxy + HLS rewriting |
+| `server/src/federation/health.ts` | Heartbeat loop (5min interval) |
 | `server/src/routes/*.ts` | API route handlers |
 
 ## Development

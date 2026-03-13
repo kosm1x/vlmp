@@ -135,6 +135,39 @@ html,body{background:var(--bg);color:var(--text);font-family:system-ui,-apple-sy
 .playlist-media-remove{color:var(--text-dim)}
 .playlist-media-remove:hover{color:var(--accent);background:rgba(229,9,20,.1)}
 
+/* Servers & Federation */
+.servers-page h2{font-size:1.3rem;font-weight:500;margin-bottom:1.5rem}
+.server-list{display:flex;flex-direction:column;gap:.5rem;margin-bottom:2rem}
+.server-card{display:flex;align-items:center;gap:1rem;padding:1rem 1.25rem;background:var(--bg-card);border-radius:6px;cursor:pointer;transition:background .15s;flex-wrap:wrap}
+.server-card:hover{background:var(--bg-hover)}
+.server-info{display:flex;align-items:center;gap:.75rem;flex:1;min-width:0}
+.server-name{font-size:1rem;font-weight:500;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.server-status{font-size:.75rem;text-transform:uppercase;letter-spacing:.06em;padding:.15rem .5rem;border-radius:12px;font-weight:600}
+.status-active{background:rgba(34,197,94,.15);color:#22c55e}
+.status-offline{background:rgba(156,163,175,.15);color:#9ca3af}
+.server-meta{display:flex;gap:1rem;font-size:.8rem;color:var(--text-dim)}
+.server-url{overflow:hidden;text-overflow:ellipsis;white-space:nowrap;max-width:300px}
+.btn-remove{background:none;border:1px solid rgba(229,9,20,.3);color:var(--text-dim);font-size:.8rem;cursor:pointer;padding:.3rem .75rem;border-radius:var(--radius);transition:color .15s,border-color .15s,background .15s}
+.btn-remove:hover{color:var(--accent);border-color:var(--accent);background:rgba(229,9,20,.08)}
+.federation-admin{display:grid;grid-template-columns:1fr 1fr;gap:1.5rem;margin-top:1.5rem}
+.admin-section{background:var(--bg-card);border-radius:6px;padding:1.5rem}
+.admin-section h3{font-size:1rem;font-weight:500;margin-bottom:.5rem}
+.admin-section p{font-size:.85rem;color:var(--text-dim);margin-bottom:1rem;line-height:1.5}
+.admin-section form{display:flex;flex-direction:column;gap:.75rem}
+.admin-section input{padding:.6rem .75rem;background:#222;border:1px solid #444;border-radius:var(--radius);color:var(--text);font-size:.9rem}
+.admin-section input:focus{outline:none;border-color:var(--accent)}
+.btn-primary{padding:.6rem 1.25rem;background:var(--accent);border:none;border-radius:var(--radius);color:#fff;font-size:.9rem;cursor:pointer;white-space:nowrap}
+.btn-primary:hover{opacity:.85}
+.invite-display{margin-top:1rem;background:rgba(255,255,255,.05);border:1px solid #333;border-radius:var(--radius);padding:1rem}
+.invite-display code{display:block;font-size:1.1rem;font-family:monospace;word-break:break-all;color:#22c55e;margin-bottom:.5rem}
+.invite-display small{color:var(--text-dim);font-size:.8rem}
+.error-msg{background:rgba(229,9,20,.1);border:1px solid rgba(229,9,20,.3);border-radius:var(--radius);padding:.75rem 1rem;color:var(--accent);font-size:.9rem;margin-bottom:1rem}
+.server-breadcrumb{font-size:.9rem;color:var(--text-dim);margin-bottom:1.5rem}
+.server-breadcrumb a{color:var(--text-dim);text-decoration:underline}
+.server-breadcrumb a:hover{color:var(--text)}
+.server-breadcrumb span{color:var(--text)}
+.media-card-server{font-size:.65rem;color:var(--text-dim);font-style:italic}
+
 /* Utilities */
 .loading{display:flex;align-items:center;justify-content:center;min-height:200px;color:var(--text-dim)}
 .empty{text-align:center;padding:4rem 2rem;color:var(--text-dim)}
@@ -156,6 +189,8 @@ html,body{background:var(--bg);color:var(--text);font-family:system-ui,-apple-sy
   .detail-title{font-size:1.4rem}
   .detail-backdrop{height:40vh}
   .playlists-page,.playlist-detail-page{padding:60px 1rem 1rem}
+  .federation-admin{grid-template-columns:1fr}
+  .server-meta{flex-direction:column;gap:.25rem}
 }
 @media(max-width:480px){
   .media-card{width:100px}

@@ -8,24 +8,30 @@ import { get, post } from "../api.js";
 import { navigate } from "../router.js";
 const html = htm.bind(h);
 
-export function MediaDetail({ id }) {
+export function MediaDetail({ id, serverId }) {
   const [media, setMedia] = useState(null);
   const [subtitles, setSubtitles] = useState([]);
   const [playlists, setPlaylists] = useState([]);
   const [showPlaylistPicker, setShowPlaylistPicker] = useState(false);
   const [error, setError] = useState("");
 
+  const isRemote = !!serverId;
   useEffect(() => {
-    get(`/library/${id}`)
+    const mediaUrl = isRemote
+      ? `/federation/servers/${serverId}/media/${id}`
+      : `/library/${id}`;
+    get(mediaUrl)
       .then(setMedia)
       .catch((e) => setError(e.message));
-    get(`/subtitles/${id}`)
-      .then(setSubtitles)
-      .catch(() => {});
-    get("/playlists")
-      .then(setPlaylists)
-      .catch(() => {});
-  }, [id]);
+    if (!isRemote) {
+      get(`/subtitles/${id}`)
+        .then(setSubtitles)
+        .catch(() => {});
+      get("/playlists")
+        .then(setPlaylists)
+        .catch(() => {});
+    }
+  }, [id, serverId]);
 
   async function addToPlaylist(playlistId) {
     try {
@@ -81,7 +87,10 @@ export function MediaDetail({ id }) {
         <div class="detail-actions">
           <button
             class="detail-play-btn"
-            onClick=${() => navigate("/play/" + id)}
+            onClick=${() =>
+              navigate(
+                isRemote ? "/play/fed/" + serverId + "/" + id : "/play/" + id,
+              )}
           >
             Play
           </button>

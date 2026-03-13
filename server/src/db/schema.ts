@@ -1,4 +1,4 @@
-import type Database from 'better-sqlite3';
+import type Database from "better-sqlite3";
 
 const SCHEMA_VERSION = 1;
 
@@ -148,6 +148,13 @@ CREATE TABLE IF NOT EXISTS federated_servers (
   last_seen INTEGER,
   added_at INTEGER NOT NULL DEFAULT (unixepoch())
 );
+CREATE TABLE IF NOT EXISTS federation_invites (
+  id INTEGER PRIMARY KEY,
+  token TEXT UNIQUE NOT NULL,
+  created_at INTEGER NOT NULL DEFAULT (unixepoch()),
+  expires_at INTEGER NOT NULL,
+  used INTEGER NOT NULL DEFAULT 0
+);
 `;
 
 const INDEXES = `
@@ -159,14 +166,21 @@ CREATE INDEX IF NOT EXISTS idx_progress_media ON watch_progress(media_id);
 CREATE INDEX IF NOT EXISTS idx_episodes_season ON episodes(season_id);
 CREATE INDEX IF NOT EXISTS idx_subtitles_media ON subtitles(media_id);
 CREATE INDEX IF NOT EXISTS idx_guest_code ON guest_passes(code);
+CREATE INDEX IF NOT EXISTS idx_federated_status ON federated_servers(status);
 `;
 
 export function initSchema(db: Database.Database): void {
   db.exec(TABLES);
   db.exec(INDEXES);
-  db.exec(`CREATE TABLE IF NOT EXISTS schema_version (version INTEGER NOT NULL);`);
-  const row = db.prepare('SELECT version FROM schema_version').get() as { version: number } | undefined;
+  db.exec(
+    `CREATE TABLE IF NOT EXISTS schema_version (version INTEGER NOT NULL);`,
+  );
+  const row = db.prepare("SELECT version FROM schema_version").get() as
+    | { version: number }
+    | undefined;
   if (!row) {
-    db.prepare('INSERT INTO schema_version (version) VALUES (?)').run(SCHEMA_VERSION);
+    db.prepare("INSERT INTO schema_version (version) VALUES (?)").run(
+      SCHEMA_VERSION,
+    );
   }
 }

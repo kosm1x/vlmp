@@ -14,12 +14,18 @@ import { registerPlaybackRoutes } from "./routes/playback.js";
 import { registerMetadataRoutes } from "./routes/metadata.js";
 import { registerSubtitleRoutes } from "./routes/subtitles.js";
 import { registerPlaylistRoutes } from "./routes/playlists.js";
+import { registerFederationRoutes } from "./routes/federation.js";
+import { registerFederationApiRoutes } from "./routes/federation-api.js";
+import { loadOrGenerateFingerprint } from "./federation/crypto.js";
 import { destroyAllSessions } from "./streaming/session.js";
+import { startHeartbeatLoop } from "./federation/health.js";
 
 const config = loadConfig();
 mkdirSync(config.dataDir, { recursive: true });
 mkdirSync(config.transcodeTmpDir, { recursive: true });
 mkdirSync(config.subtitleDir, { recursive: true });
+
+config.serverFingerprint = loadOrGenerateFingerprint(config.dataDir);
 
 const db = getDatabase(config);
 initSchema(db);
@@ -56,6 +62,10 @@ registerPlaybackRoutes(app, db, config);
 registerMetadataRoutes(app, db, config);
 registerSubtitleRoutes(app, db, config);
 registerPlaylistRoutes(app, db, config);
+registerFederationRoutes(app, db, config);
+registerFederationApiRoutes(app, db, config);
+
+const heartbeatTimer = startHeartbeatLoop(db, config);
 
 app.setNotFoundHandler(async (request, reply) => {
   if (
@@ -67,7 +77,8 @@ app.setNotFoundHandler(async (request, reply) => {
     request.url.startsWith("/stream/") ||
     request.url.startsWith("/metadata/") ||
     request.url.startsWith("/subtitles/") ||
-    request.url.startsWith("/playlists/")
+    request.url.startsWith("/playlists/") ||
+    request.url.startsWith("/federation/")
   ) {
     return reply.code(404).send({ error: "Not found" });
   }
@@ -76,6 +87,7 @@ app.setNotFoundHandler(async (request, reply) => {
 
 const shutdown = async () => {
   app.log.info("Shutting down...");
+  clearInterval(heartbeatTimer);
   destroyAllSessions();
   closeDatabase();
   await app.close();

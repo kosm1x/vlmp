@@ -12,6 +12,9 @@ export interface Config {
   tmdbApiKey: string;
   transcodeTmpDir: string;
   subtitleDir: string;
+  serverName: string;
+  publicUrl: string;
+  serverFingerprint: string;
 }
 
 export function loadConfig(): Config {
@@ -28,5 +31,8 @@ export function loadConfig(): Config {
     tmdbApiKey: process.env.VLMP_TMDB_API_KEY || "",
     transcodeTmpDir: resolve(dataDir, "transcode"),
     subtitleDir: resolve(dataDir, "subtitles"),
+    serverName: process.env.VLMP_SERVER_NAME || "VLMP",
+    publicUrl: process.env.VLMP_PUBLIC_URL || "",
+    serverFingerprint: "", // Set at startup after loading/generating key
   };
 }

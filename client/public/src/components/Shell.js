@@ -25,6 +25,7 @@ export function Shell({ children }) {
         <li><a href="#/documentaries">Docs</a></li>
         <li><a href="#/education">Education</a></li>
         <li><a href="#/playlists">Playlists</a></li>
+        <li><a href="#/servers">Servers</a></li>
       </ul>
       <form class="nav-search" onSubmit=${handleSearch}>
         <input
