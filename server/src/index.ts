@@ -16,6 +16,8 @@ import { registerSubtitleRoutes } from "./routes/subtitles.js";
 import { registerPlaylistRoutes } from "./routes/playlists.js";
 import { registerFederationRoutes } from "./routes/federation.js";
 import { registerFederationApiRoutes } from "./routes/federation-api.js";
+import { registerRecommendationRoutes } from "./routes/recommendations.js";
+import { registerHealthRoutes } from "./routes/health.js";
 import { loadOrGenerateFingerprint } from "./federation/crypto.js";
 import { destroyAllSessions } from "./streaming/session.js";
 import { startHeartbeatLoop } from "./federation/health.js";
@@ -98,6 +100,8 @@ registerSubtitleRoutes(app, db, config);
 registerPlaylistRoutes(app, db, config);
 registerFederationRoutes(app, db, config);
 registerFederationApiRoutes(app, db, config);
+registerRecommendationRoutes(app, db, config);
+registerHealthRoutes(app, db, config);
 
 const heartbeatTimer = startHeartbeatLoop(db, config);
 
@@ -112,7 +116,9 @@ app.setNotFoundHandler(async (request, reply) => {
     request.url.startsWith("/metadata/") ||
     request.url.startsWith("/subtitles/") ||
     request.url.startsWith("/playlists/") ||
-    request.url.startsWith("/federation/")
+    request.url.startsWith("/federation/") ||
+    request.url.startsWith("/recommendations/") ||
+    request.url.startsWith("/preferences/")
   ) {
     return reply.code(404).send({ error: "Not found" });
   }

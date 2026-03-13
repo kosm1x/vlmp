@@ -1,7 +1,7 @@
 import { h } from "https://unpkg.com/preact@10/dist/preact.module.js";
 import { useState } from "https://unpkg.com/preact@10/hooks/dist/hooks.module.js";
 import htm from "https://unpkg.com/htm@3?module";
-import { setToken } from "../api.js";
+import { setToken, getUserRole } from "../api.js";
 import { navigate } from "../router.js";
 const html = htm.bind(h);
 export function Shell({ children }) {
@@ -33,6 +33,10 @@ export function Shell({ children }) {
         <li><a href="#/education" aria-label="Education">Education</a></li>
         <li><a href="#/playlists" aria-label="Playlists">Playlists</a></li>
         <li><a href="#/servers" aria-label="Servers">Servers</a></li>
+        ${getUserRole() === "admin" &&
+        html`<li>
+          <a href="#/health" aria-label="Library Health">Health</a>
+        </li>`}
       </ul>
       <form class="nav-search" onSubmit=${handleSearch}>
         <input

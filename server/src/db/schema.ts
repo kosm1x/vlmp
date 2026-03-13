@@ -155,6 +155,31 @@ CREATE TABLE IF NOT EXISTS federation_invites (
   expires_at INTEGER NOT NULL,
   used INTEGER NOT NULL DEFAULT 0
 );
+CREATE TABLE IF NOT EXISTS viewing_log (
+  id INTEGER PRIMARY KEY,
+  user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  media_id INTEGER NOT NULL REFERENCES media_items(id) ON DELETE CASCADE,
+  watched_at INTEGER NOT NULL DEFAULT (unixepoch()),
+  position_seconds REAL NOT NULL,
+  duration_seconds REAL,
+  completed INTEGER NOT NULL DEFAULT 0
+);
+CREATE TABLE IF NOT EXISTS user_preferences (
+  id INTEGER PRIMARY KEY,
+  user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  media_id INTEGER NOT NULL REFERENCES media_items(id) ON DELETE CASCADE,
+  action TEXT NOT NULL CHECK(action IN ('like', 'dislike')),
+  created_at INTEGER NOT NULL DEFAULT (unixepoch()),
+  UNIQUE(user_id, media_id)
+);
+CREATE TABLE IF NOT EXISTS ai_cache (
+  id INTEGER PRIMARY KEY,
+  user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  cache_key TEXT NOT NULL,
+  data_json TEXT NOT NULL,
+  computed_at INTEGER NOT NULL DEFAULT (unixepoch()),
+  UNIQUE(user_id, cache_key)
+);
 `;
 
 const INDEXES = `
@@ -167,6 +192,11 @@ CREATE INDEX IF NOT EXISTS idx_episodes_season ON episodes(season_id);
 CREATE INDEX IF NOT EXISTS idx_subtitles_media ON subtitles(media_id);
 CREATE INDEX IF NOT EXISTS idx_guest_code ON guest_passes(code);
 CREATE INDEX IF NOT EXISTS idx_federated_status ON federated_servers(status);
+CREATE INDEX IF NOT EXISTS idx_viewing_log_user ON viewing_log(user_id);
+CREATE INDEX IF NOT EXISTS idx_viewing_log_media ON viewing_log(media_id);
+CREATE INDEX IF NOT EXISTS idx_viewing_log_watched ON viewing_log(watched_at);
+CREATE INDEX IF NOT EXISTS idx_user_prefs_user ON user_preferences(user_id);
+CREATE INDEX IF NOT EXISTS idx_ai_cache_user_key ON ai_cache(user_id, cache_key);
 `;
 
 export function initSchema(db: Database.Database): void {

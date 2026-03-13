@@ -92,6 +92,7 @@ html,body{background:var(--bg);color:var(--text);font-family:system-ui,-apple-sy
 .detail-subtitles h3{font-size:.85rem;font-weight:500;color:var(--text-dim);margin-bottom:.5rem;text-transform:uppercase;letter-spacing:.08em}
 .detail-subtitle-tag{display:inline-block;background:rgba(255,255,255,.08);padding:.2rem .6rem;border-radius:var(--radius);font-size:.8rem;color:var(--text-dim);margin-right:.4rem;margin-bottom:.3rem}
 .detail-error{display:flex;align-items:center;justify-content:center;min-height:50vh;color:var(--accent);font-size:1rem}
+.detail-btn.active{background:rgba(229,9,20,.2);border-color:var(--accent)}
 
 /* Playlists Page */
 .playlists-page{padding:70px 2rem 2rem;max-width:700px;margin:0 auto}
@@ -167,6 +168,24 @@ html,body{background:var(--bg);color:var(--text);font-family:system-ui,-apple-sy
 .server-breadcrumb a:hover{color:var(--text)}
 .server-breadcrumb span{color:var(--text)}
 .media-card-server{font-size:.65rem;color:var(--text-dim);font-style:italic}
+
+/* Health Dashboard */
+.health-page{padding:70px 2rem 2rem;max-width:1000px;margin:0 auto}
+.health-summary{display:grid;grid-template-columns:repeat(auto-fill,minmax(140px,1fr));gap:1rem;margin-bottom:2rem}
+.health-card{background:var(--bg-card);border-radius:6px;padding:1.25rem;text-align:center}
+.health-card-value{font-size:2rem;font-weight:600}
+.health-card-label{font-size:.8rem;color:var(--text-dim);margin-top:.25rem}
+.health-ok{color:#22c55e}
+.health-warn{color:#f59e0b}
+.health-error{color:var(--accent)}
+.health-bar{height:20px;background:var(--bg-hover);border-radius:3px;margin-bottom:.5rem;position:relative;overflow:hidden}
+.health-bar-fill{height:100%;border-radius:3px;background:var(--accent)}
+.health-bar-label{position:absolute;left:.5rem;top:50%;transform:translateY(-50%);font-size:.75rem}
+.health-issues{margin-top:2rem}
+.health-issue{display:flex;align-items:center;gap:.75rem;padding:.6rem .75rem;background:var(--bg-card);border-radius:var(--radius);margin-bottom:2px}
+.health-issue-type{font-size:.7rem;text-transform:uppercase;color:var(--accent);min-width:80px}
+.health-issue-title{flex:1;font-size:.9rem}
+.health-issue-detail{font-size:.8rem;color:var(--text-dim)}
 
 /* Utilities */
 .loading{display:flex;align-items:center;justify-content:center;min-height:200px;color:var(--text-dim)}

@@ -2,6 +2,7 @@ import type { FastifyInstance } from "fastify";
 import type Database from "better-sqlite3";
 import type { Config } from "../config.js";
 import { authMiddleware } from "../auth/middleware.js";
+import { logViewingEvent } from "../ai/viewing-log.js";
 
 export function registerProgressRoutes(
   app: FastifyInstance,
@@ -57,6 +58,11 @@ export function registerProgressRoutes(
           ? 1
           : 0
         : 0;
+      const prev = db
+        .prepare(
+          "SELECT completed FROM watch_progress WHERE user_id = ? AND media_id = ?",
+        )
+        .get(userId, mediaId) as { completed: number } | undefined;
       db.prepare(
         "INSERT INTO watch_progress (user_id, media_id, position_seconds, duration_seconds, completed, updated_at) VALUES (?, ?, ?, ?, ?, unixepoch()) ON CONFLICT(user_id, media_id) DO UPDATE SET position_seconds = excluded.position_seconds, duration_seconds = excluded.duration_seconds, completed = excluded.completed, updated_at = unixepoch()",
       ).run(
@@ -66,6 +72,28 @@ export function registerProgressRoutes(
         duration_seconds || null,
         completed,
       );
+      if (completed === 1 && prev?.completed !== 1) {
+        logViewingEvent(
+          db,
+          userId,
+          mediaId,
+          position_seconds,
+          duration_seconds || null,
+          true,
+        );
+      } else if (
+        duration_seconds &&
+        position_seconds / duration_seconds > 0.25
+      ) {
+        logViewingEvent(
+          db,
+          userId,
+          mediaId,
+          position_seconds,
+          duration_seconds,
+          false,
+        );
+      }
       return { ok: true };
     },
   );

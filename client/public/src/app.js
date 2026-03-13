@@ -16,6 +16,7 @@ import { Playlists } from "./components/Playlists.js";
 import { PlaylistDetail } from "./components/PlaylistDetail.js";
 import { Servers } from "./components/Servers.js";
 import { ServerBrowse } from "./components/ServerBrowse.js";
+import { HealthDashboard } from "./components/HealthDashboard.js";
 const html = htm.bind(h);
 
 function NotFound() {
@@ -78,6 +79,9 @@ function App() {
       content = pathParts[1]
         ? html`<${PlaylistDetail} id=${pathParts[1]} />`
         : html`<${Playlists} />`;
+      break;
+    case "health":
+      content = html`<${HealthDashboard} />`;
       break;
     case "servers":
       if (pathParts[1] && pathParts[2] === "detail")

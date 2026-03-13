@@ -4,8 +4,9 @@ import {
   useEffect,
 } from "https://unpkg.com/preact@10/hooks/dist/hooks.module.js";
 import htm from "https://unpkg.com/htm@3?module";
-import { get, post } from "../api.js";
+import { get, post, del } from "../api.js";
 import { navigate } from "../router.js";
+import { MediaRow } from "./MediaRow.js";
 const html = htm.bind(h);
 
 export function MediaDetail({ id, serverId }) {
@@ -14,6 +15,8 @@ export function MediaDetail({ id, serverId }) {
   const [playlists, setPlaylists] = useState([]);
   const [showPlaylistPicker, setShowPlaylistPicker] = useState(false);
   const [error, setError] = useState("");
+  const [preference, setPreference] = useState(null);
+  const [similar, setSimilar] = useState([]);
 
   const isRemote = !!serverId;
   useEffect(() => {
@@ -30,8 +33,32 @@ export function MediaDetail({ id, serverId }) {
       get("/playlists")
         .then(setPlaylists)
         .catch(() => {});
+      get("/preferences")
+        .then((prefs) => {
+          const match = prefs.find((p) => p.media_id === parseInt(id, 10));
+          if (match) setPreference(match.action);
+          else setPreference(null);
+        })
+        .catch(() => {});
+      get(`/recommendations/similar/${id}?limit=10`)
+        .then((d) => setSimilar(d.items || []))
+        .catch(() => {});
     }
   }, [id, serverId]);
+
+  async function togglePreference(action) {
+    try {
+      if (preference === action) {
+        await del(`/preferences/${id}`);
+        setPreference(null);
+      } else {
+        await post(`/preferences/${id}`, { action });
+        setPreference(action);
+      }
+    } catch (e) {
+      alert(e.message);
+    }
+  }
 
   async function addToPlaylist(playlistId) {
     try {
@@ -100,6 +127,19 @@ export function MediaDetail({ id, serverId }) {
           >
             + Playlist
           </button>
+          ${!isRemote &&
+          html`<button
+              class=${`detail-btn${preference === "like" ? " active" : ""}`}
+              onClick=${() => togglePreference("like")}
+            >
+              Like
+            </button>
+            <button
+              class=${`detail-btn${preference === "dislike" ? " active" : ""}`}
+              onClick=${() => togglePreference("dislike")}
+            >
+              Dislike
+            </button>`}
         </div>
         ${showPlaylistPicker &&
         html`<div class="detail-playlist-picker">
@@ -127,5 +167,12 @@ export function MediaDetail({ id, serverId }) {
         </div>`}
       </div>
     </div>
+    ${!isRemote &&
+    similar.length > 0 &&
+    html`<div
+      style=${{ padding: "0 2rem 2rem", maxWidth: "1100px", margin: "0 auto" }}
+    >
+      <${MediaRow} label="Similar" items=${similar} />
+    </div>`}
   </div>`;
 }

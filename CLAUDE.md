@@ -28,6 +28,11 @@ Server handles transcoding, metadata, subtitles. Client is a thin Preact shell s
 | `server/src/federation/client.ts` | Outbound signed fetch to peers |
 | `server/src/federation/proxy.ts` | Library/stream proxy + HLS rewriting |
 | `server/src/federation/health.ts` | Heartbeat loop (5min interval) |
+| `server/src/ai/viewing-log.ts` | Viewing history tracking + dedup |
+| `server/src/ai/preferences.ts` | Like/dislike preference CRUD |
+| `server/src/ai/cache.ts` | TTL-based recommendation cache |
+| `server/src/ai/recommender.ts` | 5-strategy recommendation engine |
+| `server/src/ai/health.ts` | Library health checks + cleanup |
 | `server/src/routes/*.ts` | API route handlers |
 
 ## Development
