@@ -56,8 +56,11 @@ export function getLibraryFolders(db: Database.Database): LibraryFolder[] {
 }
 
 export function removeLibraryFolder(db: Database.Database, id: number): void {
-  db.prepare("DELETE FROM media_items WHERE library_folder_id = ?").run(id);
-  db.prepare("DELETE FROM library_folders WHERE id = ?").run(id);
+  const remove = db.transaction(() => {
+    db.prepare("DELETE FROM media_items WHERE library_folder_id = ?").run(id);
+    db.prepare("DELETE FROM library_folders WHERE id = ?").run(id);
+  });
+  remove();
 }
 
 export async function scanLibraryFolder(

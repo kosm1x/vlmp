@@ -1,5 +1,5 @@
 import type Database from "better-sqlite3";
-import { existsSync, statSync } from "node:fs";
+import { access, stat as fsStat } from "node:fs/promises";
 
 export interface HealthIssue {
   type:
@@ -29,7 +29,9 @@ export interface HealthReport {
   issues: HealthIssue[];
 }
 
-export function generateHealthReport(db: Database.Database): HealthReport {
+export async function generateHealthReport(
+  db: Database.Database,
+): Promise<HealthReport> {
   const issues: HealthIssue[] = [];
 
   // Total items
@@ -38,7 +40,7 @@ export function generateHealthReport(db: Database.Database): HealthReport {
     .get() as { count: number };
 
   // 1. Missing files
-  const missingFiles = getMissingFiles(db);
+  const missingFiles = await getMissingFiles(db);
   issues.push(...missingFiles);
 
   // 2. Zero-byte files
@@ -49,22 +51,24 @@ export function generateHealthReport(db: Database.Database): HealthReport {
     .all() as { id: number; title: string; file_path: string }[];
 
   const zeroByteIssues: HealthIssue[] = [];
-  for (const item of zeroByte) {
-    // Confirm with statSync if file exists
-    try {
-      if (existsSync(item.file_path)) {
-        const stat = statSync(item.file_path);
-        if (stat.size === 0) {
-          zeroByteIssues.push({
-            type: "zero_byte",
-            media_id: item.id,
-            title: item.title,
-            detail: "File is zero bytes",
-          });
-        }
+  const BATCH_SIZE = 50;
+  for (let i = 0; i < zeroByte.length; i += BATCH_SIZE) {
+    const batch = zeroByte.slice(i, i + BATCH_SIZE);
+    const results = await Promise.allSettled(
+      batch.map(async (item) => {
+        const s = await fsStat(item.file_path);
+        return { item, size: s.size };
+      }),
+    );
+    for (const r of results) {
+      if (r.status === "fulfilled" && r.value.size === 0) {
+        zeroByteIssues.push({
+          type: "zero_byte",
+          media_id: r.value.item.id,
+          title: r.value.item.title,
+          detail: "File is zero bytes",
+        });
       }
-    } catch {
-      // File doesn't exist — already caught by missing files check
     }
   }
   issues.push(...zeroByteIssues);
@@ -229,20 +233,29 @@ export function generateHealthReport(db: Database.Database): HealthReport {
   };
 }
 
-export function getMissingFiles(db: Database.Database): HealthIssue[] {
+export async function getMissingFiles(
+  db: Database.Database,
+): Promise<HealthIssue[]> {
   const allMedia = db
     .prepare("SELECT id, title, file_path FROM media_items")
     .all() as { id: number; title: string; file_path: string }[];
 
   const issues: HealthIssue[] = [];
-  for (const item of allMedia) {
-    if (!existsSync(item.file_path)) {
-      issues.push({
-        type: "missing_file",
-        media_id: item.id,
-        title: item.title,
-        detail: `File not found: ${item.file_path}`,
-      });
+  const BATCH_SIZE = 50;
+  for (let i = 0; i < allMedia.length; i += BATCH_SIZE) {
+    const batch = allMedia.slice(i, i + BATCH_SIZE);
+    const results = await Promise.allSettled(
+      batch.map((item) => access(item.file_path)),
+    );
+    for (let j = 0; j < results.length; j++) {
+      if (results[j].status === "rejected") {
+        issues.push({
+          type: "missing_file",
+          media_id: batch[j].id,
+          title: batch[j].title,
+          detail: `File not found: ${batch[j].file_path}`,
+        });
+      }
     }
   }
   return issues;

@@ -19,7 +19,7 @@ interface CacheRow {
 function isCacheFresh(db: Database.Database, mediaId: number): boolean {
   const row = db
     .prepare(
-      "SELECT fetched_at FROM metadata_cache WHERE media_id = ? ORDER BY fetched_at DESC LIMIT 1",
+      "SELECT fetched_at FROM metadata_cache WHERE media_id = ? AND provider = 'tmdb'",
     )
     .get(mediaId) as CacheRow | undefined;
   if (!row) return false;
@@ -30,7 +30,7 @@ function isCacheFresh(db: Database.Database, mediaId: number): boolean {
 function isShowCacheFresh(db: Database.Database, showId: number): boolean {
   const row = db
     .prepare(
-      "SELECT fetched_at FROM metadata_cache WHERE show_id = ? ORDER BY fetched_at DESC LIMIT 1",
+      "SELECT fetched_at FROM metadata_cache WHERE show_id = ? AND provider = 'tmdb'",
     )
     .get(showId) as CacheRow | undefined;
   if (!row) return false;
@@ -76,7 +76,7 @@ export async function matchAndApplyMetadata(
     );
     const now = Math.floor(Date.now() / 1000);
     db.prepare(
-      "INSERT OR REPLACE INTO metadata_cache (media_id, provider, external_id, data_json, fetched_at) VALUES (?, ?, ?, ?, ?)",
+      "INSERT INTO metadata_cache (media_id, provider, external_id, data_json, fetched_at) VALUES (?, ?, ?, ?, ?) ON CONFLICT(media_id, provider) DO UPDATE SET external_id = excluded.external_id, data_json = excluded.data_json, fetched_at = excluded.fetched_at",
     ).run(mediaId, "tmdb", String(best.id), JSON.stringify(detail), now);
   } else {
     const detail = await getMovieDetail(best.id, config.tmdbApiKey);
@@ -93,7 +93,7 @@ export async function matchAndApplyMetadata(
     );
     const now = Math.floor(Date.now() / 1000);
     db.prepare(
-      "INSERT OR REPLACE INTO metadata_cache (media_id, provider, external_id, data_json, fetched_at) VALUES (?, ?, ?, ?, ?)",
+      "INSERT INTO metadata_cache (media_id, provider, external_id, data_json, fetched_at) VALUES (?, ?, ?, ?, ?) ON CONFLICT(media_id, provider) DO UPDATE SET external_id = excluded.external_id, data_json = excluded.data_json, fetched_at = excluded.fetched_at",
     ).run(mediaId, "tmdb", String(best.id), JSON.stringify(detail), now);
   }
   return true;
@@ -129,7 +129,7 @@ export async function matchAndApplyShowMetadata(
 
   const now = Math.floor(Date.now() / 1000);
   db.prepare(
-    "INSERT OR REPLACE INTO metadata_cache (show_id, provider, external_id, data_json, fetched_at) VALUES (?, ?, ?, ?, ?)",
+    "INSERT INTO metadata_cache (show_id, provider, external_id, data_json, fetched_at) VALUES (?, ?, ?, ?, ?) ON CONFLICT(show_id, provider) DO UPDATE SET external_id = excluded.external_id, data_json = excluded.data_json, fetched_at = excluded.fetched_at",
   ).run(showId, "tmdb", String(best.id), JSON.stringify(detail), now);
 
   return true;
@@ -159,7 +159,7 @@ export async function applyManualMatch(
     );
     const now = Math.floor(Date.now() / 1000);
     db.prepare(
-      "INSERT OR REPLACE INTO metadata_cache (media_id, provider, external_id, data_json, fetched_at) VALUES (?, ?, ?, ?, ?)",
+      "INSERT INTO metadata_cache (media_id, provider, external_id, data_json, fetched_at) VALUES (?, ?, ?, ?, ?) ON CONFLICT(media_id, provider) DO UPDATE SET external_id = excluded.external_id, data_json = excluded.data_json, fetched_at = excluded.fetched_at",
     ).run(mediaId, "tmdb", String(tmdbId), JSON.stringify(detail), now);
   } else {
     const detail = await getMovieDetail(tmdbId, config.tmdbApiKey);
@@ -176,7 +176,7 @@ export async function applyManualMatch(
     );
     const now = Math.floor(Date.now() / 1000);
     db.prepare(
-      "INSERT OR REPLACE INTO metadata_cache (media_id, provider, external_id, data_json, fetched_at) VALUES (?, ?, ?, ?, ?)",
+      "INSERT INTO metadata_cache (media_id, provider, external_id, data_json, fetched_at) VALUES (?, ?, ?, ?, ?) ON CONFLICT(media_id, provider) DO UPDATE SET external_id = excluded.external_id, data_json = excluded.data_json, fetched_at = excluded.fetched_at",
     ).run(mediaId, "tmdb", String(tmdbId), JSON.stringify(detail), now);
   }
   return true;

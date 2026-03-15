@@ -64,9 +64,16 @@ export function getRecommendations(
     }
   }
 
+  // Build genre affinity once, reuse in strategy 3 and genre-boost pipeline
+  const completedGenreAffinity = buildGenreAffinity(db, completedIds);
+
   // Strategy 3: Genre matching (requires >= 1 completion)
   if (completedIds.length >= 1) {
-    const genreItems = genreMatchingStrategy(db, completedIds);
+    const genreItems = genreMatchingStrategy(
+      db,
+      completedIds,
+      completedGenreAffinity,
+    );
     if (genreItems.length > 0) {
       strategiesUsed.push("genre_matching");
       for (const item of genreItems) mergeItem(allScored, item);
@@ -96,9 +103,12 @@ export function getRecommendations(
   // Pipeline: boost liked genres, exclude watched + disliked, sort, slice
   let results = Array.from(allScored.values());
 
+  // Batch-fetch genres for all scored items (avoids N+1)
+  const scoredIds = results.map((r) => r.media_id);
+  const genreMap = batchGetGenres(db, scoredIds);
+
   for (const item of results) {
-    // Boost liked genre items by 20%
-    const mediaGenres = getMediaGenres(db, item.media_id);
+    const mediaGenres = genreMap.get(item.media_id) || [];
     for (const g of mediaGenres) {
       if (likedGenres.has(g)) {
         item.score *= 1.2;
@@ -155,7 +165,8 @@ function nextEpisodeStrategy(
        JOIN tv_shows tv ON tv.id = s.show_id
        JOIN media_items mi ON mi.id = vl.media_id
        WHERE vl.user_id = ? AND vl.completed = 1
-       ORDER BY vl.watched_at DESC`,
+       ORDER BY vl.watched_at DESC
+       LIMIT 200`,
     )
     .all(userId) as {
     season_id: number;
@@ -270,21 +281,33 @@ function collaborativeStrategy(
 function genreMatchingStrategy(
   db: Database.Database,
   completedIds: number[],
+  genreAffinity: Map<string, number>,
 ): ScoredItem[] {
-  // Build genre affinity map from completed items
-  const genreAffinity = buildGenreAffinity(db, completedIds);
   if (genreAffinity.size === 0) return [];
 
-  // Score all unwatched items by genre overlap
-  const allMedia = db
-    .prepare("SELECT id, genres FROM media_items WHERE genres IS NOT NULL")
-    .all() as { id: number; genres: string }[];
+  // Build LIKE clauses for top genres to pre-filter in SQL
+  const topGenres = Array.from(genreAffinity.entries())
+    .sort((a, b) => b[1] - a[1])
+    .slice(0, 10)
+    .map(([g]) => g);
 
-  const completedSet = new Set(completedIds);
+  const likeClauses = topGenres.map(() => "LOWER(genres) LIKE ?").join(" OR ");
+  const likeParams = topGenres.map((g) => `%${g}%`);
+
+  // Exclude completed items in SQL
+  const excludePlaceholders = completedIds.map(() => "?").join(",");
+  const excludeClause =
+    completedIds.length > 0 ? `AND id NOT IN (${excludePlaceholders})` : "";
+
+  const candidates = db
+    .prepare(
+      `SELECT id, genres FROM media_items WHERE genres IS NOT NULL ${excludeClause} AND (${likeClauses})`,
+    )
+    .all(...completedIds, ...likeParams) as { id: number; genres: string }[];
+
   const results: ScoredItem[] = [];
 
-  for (const item of allMedia) {
-    if (completedSet.has(item.id)) continue;
+  for (const item of candidates) {
     const itemGenres = item.genres
       .split(",")
       .map((g) => g.trim().toLowerCase());
@@ -325,34 +348,47 @@ function similarItemsStrategy(
 ): ScoredItem[] {
   if (seedIds.length === 0) return [];
 
+  const seedPlaceholders = seedIds.map(() => "?").join(",");
   const seedMedia = db
     .prepare(
-      `SELECT id, type, genres, year, rating FROM media_items WHERE id IN (${seedIds.map(() => "?").join(",")})`,
+      `SELECT id, type, genres, year, rating FROM media_items WHERE id IN (${seedPlaceholders})`,
     )
     .all(...seedIds) as MediaRow[];
 
-  const allMedia = db
-    .prepare("SELECT id, type, genres, year, rating FROM media_items")
-    .all() as MediaRow[];
+  if (seedMedia.length === 0) return [];
 
-  const seedSet = new Set(seedIds);
+  // Collect seed types and year range for SQL pre-filtering
+  const seedTypes = [...new Set(seedMedia.map((s) => s.type))];
+  const seedYears = seedMedia.map((s) => s.year).filter(Boolean) as number[];
+  const minYear = seedYears.length > 0 ? Math.min(...seedYears) - 5 : null;
+  const maxYear = seedYears.length > 0 ? Math.max(...seedYears) + 5 : null;
+
+  // Pre-filter candidates by type match OR year proximity in SQL
+  const typePlaceholders = seedTypes.map(() => "?").join(",");
+  let candidateQuery = `SELECT id, type, genres, year, rating FROM media_items WHERE id NOT IN (${seedPlaceholders}) AND (type IN (${typePlaceholders})`;
+  const params: (string | number)[] = [...seedIds, ...seedTypes];
+
+  if (minYear !== null && maxYear !== null) {
+    candidateQuery += " OR (year BETWEEN ? AND ?)";
+    params.push(minYear, maxYear);
+  }
+  candidateQuery += ")";
+
+  const candidates = db.prepare(candidateQuery).all(...params) as MediaRow[];
+
   const scored = new Map<number, number>();
 
   for (const seed of seedMedia) {
     const seedGenres = parseGenres(seed.genres);
 
-    for (const candidate of allMedia) {
-      if (seedSet.has(candidate.id)) continue;
-
+    for (const candidate of candidates) {
       let score = 0;
       const candidateGenres = parseGenres(candidate.genres);
 
-      // Shared genres: +10 each
       for (const g of candidateGenres) {
         if (seedGenres.has(g)) score += 10;
       }
 
-      // Year proximity within 5 years: +5
       if (
         seed.year &&
         candidate.year &&
@@ -361,10 +397,8 @@ function similarItemsStrategy(
         score += 5;
       }
 
-      // Same type: +3
       if (seed.type === candidate.type) score += 3;
 
-      // Close rating (within 1.0): +2
       if (
         seed.rating &&
         candidate.rating &&
@@ -462,13 +496,26 @@ function parseGenres(genres: string | null): Set<string> {
   );
 }
 
-function getMediaGenres(db: Database.Database, mediaId: number): string[] {
-  const row = db
-    .prepare("SELECT genres FROM media_items WHERE id = ?")
-    .get(mediaId) as { genres: string | null } | undefined;
-  if (!row?.genres) return [];
-  return row.genres
-    .split(",")
-    .map((g) => g.trim().toLowerCase())
-    .filter(Boolean);
+function batchGetGenres(
+  db: Database.Database,
+  mediaIds: number[],
+): Map<number, string[]> {
+  const result = new Map<number, string[]>();
+  if (mediaIds.length === 0) return result;
+  const placeholders = mediaIds.map(() => "?").join(",");
+  const rows = db
+    .prepare(
+      `SELECT id, genres FROM media_items WHERE id IN (${placeholders}) AND genres IS NOT NULL`,
+    )
+    .all(...mediaIds) as { id: number; genres: string }[];
+  for (const row of rows) {
+    result.set(
+      row.id,
+      row.genres
+        .split(",")
+        .map((g) => g.trim().toLowerCase())
+        .filter(Boolean),
+    );
+  }
+  return result;
 }

@@ -20,30 +20,45 @@ export function MediaDetail({ id, serverId }) {
 
   const isRemote = !!serverId;
   useEffect(() => {
+    let cancelled = false;
     const mediaUrl = isRemote
       ? `/federation/servers/${serverId}/media/${id}`
       : `/library/${id}`;
     get(mediaUrl)
-      .then(setMedia)
-      .catch((e) => setError(e.message));
+      .then((d) => {
+        if (!cancelled) setMedia(d);
+      })
+      .catch((e) => {
+        if (!cancelled) setError(e.message);
+      });
     if (!isRemote) {
       get(`/subtitles/${id}`)
-        .then(setSubtitles)
+        .then((d) => {
+          if (!cancelled) setSubtitles(d);
+        })
         .catch(() => {});
       get("/playlists")
-        .then(setPlaylists)
+        .then((d) => {
+          if (!cancelled) setPlaylists(d);
+        })
         .catch(() => {});
       get("/preferences")
         .then((prefs) => {
+          if (cancelled) return;
           const match = prefs.find((p) => p.media_id === parseInt(id, 10));
           if (match) setPreference(match.action);
           else setPreference(null);
         })
         .catch(() => {});
       get(`/recommendations/similar/${id}?limit=10`)
-        .then((d) => setSimilar(d.items || []))
+        .then((d) => {
+          if (!cancelled) setSimilar(d.items || []);
+        })
         .catch(() => {});
     }
+    return () => {
+      cancelled = true;
+    };
   }, [id, serverId]);
 
   async function togglePreference(action) {

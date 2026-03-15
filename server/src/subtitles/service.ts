@@ -19,16 +19,19 @@ export function persistSubtitles(
   const insert = db.prepare(
     "INSERT OR IGNORE INTO subtitles (media_id, language, label, format, file_path, source) VALUES (?, ?, ?, ?, ?, ?)",
   );
-  for (const sub of extracted) {
-    insert.run(
-      mediaId,
-      sub.language,
-      sub.label,
-      sub.format,
-      sub.file_path,
-      "extracted",
-    );
-  }
+  const insertAll = db.transaction(() => {
+    for (const sub of extracted) {
+      insert.run(
+        mediaId,
+        sub.language,
+        sub.label,
+        sub.format,
+        sub.file_path,
+        "extracted",
+      );
+    }
+  });
+  insertAll();
 }
 
 export function getSubtitlesForMedia(

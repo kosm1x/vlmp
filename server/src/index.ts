@@ -7,6 +7,7 @@ import { mkdirSync } from "node:fs";
 import { loadConfig } from "./config.js";
 import { getDatabase, closeDatabase } from "./db/index.js";
 import { initSchema } from "./db/schema.js";
+import { startCleanupLoop } from "./db/cleanup.js";
 import { registerAuthRoutes } from "./routes/auth.js";
 import { registerLibraryRoutes } from "./routes/library.js";
 import { registerProgressRoutes } from "./routes/progress.js";
@@ -104,6 +105,7 @@ registerRecommendationRoutes(app, db, config);
 registerHealthRoutes(app, db, config);
 
 const heartbeatTimer = startHeartbeatLoop(db, config);
+const cleanupTimer = startCleanupLoop(db);
 
 app.setNotFoundHandler(async (request, reply) => {
   if (
@@ -128,6 +130,7 @@ app.setNotFoundHandler(async (request, reply) => {
 const shutdown = async () => {
   app.log.info("Shutting down...");
   clearInterval(heartbeatTimer);
+  clearInterval(cleanupTimer);
   destroyAllSessions();
   closeDatabase();
   await app.close();

@@ -32,7 +32,8 @@ Server handles transcoding, metadata, subtitles. Client is a thin Preact shell s
 | `server/src/ai/preferences.ts` | Like/dislike preference CRUD |
 | `server/src/ai/cache.ts` | TTL-based recommendation cache |
 | `server/src/ai/recommender.ts` | 5-strategy recommendation engine |
-| `server/src/ai/health.ts` | Library health checks + cleanup |
+| `server/src/ai/health.ts` | Library health checks + cleanup (async) |
+| `server/src/db/cleanup.ts` | Periodic expired row cleanup (sessions, invites, cache) |
 | `server/src/routes/*.ts` | API route handlers |
 
 ## Development
@@ -49,4 +50,11 @@ npm run test         # vitest run
 - Config loaded at startup via `loadConfig()`, passed to modules
 - All JSON parsing wrapped in try/catch
 - FFmpeg/FFprobe via child_process.spawn
-- Database uses WAL mode
+- Database: WAL mode, `synchronous=NORMAL`, 8MB page cache, `PRAGMA optimize` on close
+- Expired row cleanup runs hourly (sessions, guest passes, invites, ai_cache)
+- JWT secret cached via WeakMap (one encode per config lifetime)
+- Health report and file checks are async (batched `fs.access`, not `existsSync`)
+- Federation `last_seen` writes debounced to 1/min to avoid write amplification
+- Recommender: batch genre lookups, SQL-level pre-filtering, no full table scans
+- Subtitle inserts and library folder deletes wrapped in transactions
+- Direct play uses async `stat()` to avoid blocking event loop on range requests

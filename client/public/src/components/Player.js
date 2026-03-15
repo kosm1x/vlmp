@@ -22,6 +22,7 @@ export function Player({ mediaId, onClose, serverId, federated }) {
   const videoRef = useRef(null);
   const hlsRef = useRef(null);
   const progressTimer = useRef(null);
+  const lastUiUpdate = useRef(0);
   const [session, setSession] = useState(null);
   const [media, setMedia] = useState(null);
   const [playing, setPlaying] = useState(false);
@@ -122,6 +123,7 @@ export function Player({ mediaId, onClose, serverId, federated }) {
   }, [mediaId]);
 
   useEffect(() => {
+    if (federated) return;
     progressTimer.current = setInterval(() => {
       const v = videoRef.current;
       if (v && v.currentTime > 0)
@@ -131,14 +133,17 @@ export function Player({ mediaId, onClose, serverId, federated }) {
         }).catch(() => {});
     }, 10000);
     return () => clearInterval(progressTimer.current);
-  }, [mediaId]);
+  }, [mediaId, federated]);
 
   function onTimeUpdate() {
     const v = videoRef.current;
-    if (v) {
-      setCurrentTime(v.currentTime);
-      setDuration(v.duration || 0);
-    }
+    if (!v) return;
+    const now = Date.now();
+    if (now - lastUiUpdate.current < 1000) return;
+    lastUiUpdate.current = now;
+    setCurrentTime(v.currentTime);
+    const d = v.duration || 0;
+    if (d !== duration) setDuration(d);
   }
   function togglePlay() {
     const v = videoRef.current;

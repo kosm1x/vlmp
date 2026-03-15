@@ -18,6 +18,9 @@ declare module "fastify" {
   }
 }
 
+const lastSeenWriteTime = new Map<number, number>();
+const LAST_SEEN_DEBOUNCE_MS = 60_000;
+
 export function federationAuth(db: Database.Database) {
   return async function verifyFederation(
     request: FastifyRequest,
@@ -65,9 +68,14 @@ export function federationAuth(db: Database.Database) {
       return;
     }
 
-    db.prepare(
-      "UPDATE federated_servers SET last_seen = unixepoch() WHERE id = ?",
-    ).run(server.id);
+    const now = Date.now();
+    const lastWrite = lastSeenWriteTime.get(server.id) || 0;
+    if (now - lastWrite > LAST_SEEN_DEBOUNCE_MS) {
+      db.prepare(
+        "UPDATE federated_servers SET last_seen = unixepoch() WHERE id = ?",
+      ).run(server.id);
+      lastSeenWriteTime.set(server.id, now);
+    }
 
     request.federatedServer = server;
   };

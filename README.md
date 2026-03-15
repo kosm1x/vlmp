@@ -85,8 +85,9 @@ vlmp/
 │   │   ├── middleware.ts      # Fastify preHandler auth guard
 │   │   └── guest.ts          # Guest pass creation/validation
 │   ├── db/
-│   │   ├── index.ts          # SQLite singleton (WAL mode, FK enforcement)
-│   │   └── schema.ts         # 21 tables, 14 indexes
+│   │   ├── index.ts          # SQLite singleton (WAL, sync=NORMAL, 8MB cache)
+│   │   ├── schema.ts         # 21 tables, 17 indexes
+│   │   └── cleanup.ts        # Hourly expired row cleanup (sessions, invites, cache)
 │   ├── scanner/
 │   │   ├── discover.ts       # Recursive file walker (22 video/audio formats)
 │   │   ├── classify.ts       # Folder-based categorization + filename parsing
@@ -152,7 +153,7 @@ vlmp/
 │           ├── Servers.js    # Federated server list, invite/link admin
 │           ├── ServerBrowse.js # Remote library browser
 │           └── HealthDashboard.js # Admin library health dashboard
-└── server/tests/             # 176 unit tests (vitest)
+└── server/tests/             # 176 tests across 23 files (vitest)
 ```
 
 ## API Overview

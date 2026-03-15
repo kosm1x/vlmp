@@ -136,7 +136,9 @@ CREATE TABLE IF NOT EXISTS metadata_cache (
   provider TEXT NOT NULL,
   external_id TEXT NOT NULL,
   data_json TEXT NOT NULL,
-  fetched_at INTEGER NOT NULL DEFAULT (unixepoch())
+  fetched_at INTEGER NOT NULL DEFAULT (unixepoch()),
+  UNIQUE(media_id, provider),
+  UNIQUE(show_id, provider)
 );
 CREATE TABLE IF NOT EXISTS federated_servers (
   id INTEGER PRIMARY KEY,
@@ -186,17 +188,19 @@ const INDEXES = `
 CREATE INDEX IF NOT EXISTS idx_media_type ON media_items(type);
 CREATE INDEX IF NOT EXISTS idx_media_title ON media_items(title);
 CREATE INDEX IF NOT EXISTS idx_media_library ON media_items(library_folder_id);
-CREATE INDEX IF NOT EXISTS idx_progress_user ON watch_progress(user_id);
-CREATE INDEX IF NOT EXISTS idx_progress_media ON watch_progress(media_id);
+CREATE INDEX IF NOT EXISTS idx_media_sort_title ON media_items(sort_title);
+CREATE INDEX IF NOT EXISTS idx_media_added_at ON media_items(added_at);
 CREATE INDEX IF NOT EXISTS idx_episodes_season ON episodes(season_id);
 CREATE INDEX IF NOT EXISTS idx_subtitles_media ON subtitles(media_id);
 CREATE INDEX IF NOT EXISTS idx_guest_code ON guest_passes(code);
+CREATE INDEX IF NOT EXISTS idx_sessions_user ON sessions(user_id);
 CREATE INDEX IF NOT EXISTS idx_federated_status ON federated_servers(status);
-CREATE INDEX IF NOT EXISTS idx_viewing_log_user ON viewing_log(user_id);
+CREATE INDEX IF NOT EXISTS idx_viewing_log_user_completed ON viewing_log(user_id, completed, watched_at);
 CREATE INDEX IF NOT EXISTS idx_viewing_log_media ON viewing_log(media_id);
-CREATE INDEX IF NOT EXISTS idx_viewing_log_watched ON viewing_log(watched_at);
 CREATE INDEX IF NOT EXISTS idx_user_prefs_user ON user_preferences(user_id);
 CREATE INDEX IF NOT EXISTS idx_ai_cache_user_key ON ai_cache(user_id, cache_key);
+CREATE INDEX IF NOT EXISTS idx_metadata_cache_media ON metadata_cache(media_id);
+CREATE INDEX IF NOT EXISTS idx_metadata_cache_show ON metadata_cache(show_id);
 `;
 
 export function initSchema(db: Database.Database): void {

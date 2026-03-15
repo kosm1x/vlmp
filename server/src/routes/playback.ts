@@ -38,7 +38,7 @@ function getMediaById(db: Database.Database, id: number): MediaRow | undefined {
     .get(id) as MediaRow | undefined;
 }
 
-const SESSION_ID_PATTERN = /^[a-f0-9-]{36}$/;
+const SESSION_ID_PATTERN = /^[a-f0-9]{32}$/;
 
 function validateSessionId(sessionId: string): boolean {
   return SESSION_ID_PATTERN.test(sessionId);

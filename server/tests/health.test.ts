@@ -111,32 +111,32 @@ afterEach(() => {
 });
 
 describe("health report", () => {
-  it("summary counts correct for seeded data", () => {
-    const report = generateHealthReport(db);
+  it("summary counts correct for seeded data", async () => {
+    const report = await generateHealthReport(db);
     expect(report.summary.total_items).toBe(5);
   });
 
-  it("metadata gaps detected for items missing poster/description/genres", () => {
-    const report = generateHealthReport(db);
+  it("metadata gaps detected for items missing poster/description/genres", async () => {
+    const report = await generateHealthReport(db);
     // Items 2 (no poster), 3 (no desc), 4 (no genres) = 3 gaps
     expect(report.summary.metadata_gaps).toBe(3);
     const gapIssues = report.issues.filter((i) => i.type === "metadata_gap");
     expect(gapIssues).toHaveLength(3);
   });
 
-  it("no subtitles detected", () => {
+  it("no subtitles detected", async () => {
     // Add a subtitle for item 1
     db.prepare(
       "INSERT INTO subtitles (media_id, language, format, file_path) VALUES (?, ?, ?, ?)",
     ).run(1, "en", "srt", "/test/movies/complete.srt");
 
-    const report = generateHealthReport(db);
+    const report = await generateHealthReport(db);
     // Items 2-5 have no subtitles = 4
     expect(report.summary.no_subtitles).toBe(4);
   });
 
-  it("codec analysis correct", () => {
-    const report = generateHealthReport(db);
+  it("codec analysis correct", async () => {
+    const report = await generateHealthReport(db);
     const codecs = report.codec_analysis;
     const h264 = codecs.find((c) => c.codec === "h264");
     const hevc = codecs.find((c) => c.codec === "hevc");
@@ -144,8 +144,8 @@ describe("health report", () => {
     expect(hevc?.count).toBe(2);
   });
 
-  it("resolution stats buckets correct", () => {
-    const report = generateHealthReport(db);
+  it("resolution stats buckets correct", async () => {
+    const report = await generateHealthReport(db);
     const res = report.resolution_stats;
     const bucketMap = new Map(res.map((r) => [r.bucket, r.count]));
     expect(bucketMap.get("4K")).toBe(1); // 2160
@@ -155,7 +155,7 @@ describe("health report", () => {
     expect(bucketMap.get("Unknown")).toBe(1); // 0
   });
 
-  it("duplicate detection with same title+year+duration", () => {
+  it("duplicate detection with same title+year+duration", async () => {
     // Insert a duplicate of item 1
     db.prepare(
       `INSERT INTO media_items (library_folder_id, type, file_path, title, sort_title, genres, poster_path, description, codec_video, resolution_height, year, duration, file_size)
@@ -176,13 +176,13 @@ describe("health report", () => {
       1000,
     );
 
-    const report = generateHealthReport(db);
+    const report = await generateHealthReport(db);
     expect(report.summary.duplicates).toBe(2);
     const dupIssues = report.issues.filter((i) => i.type === "duplicate");
     expect(dupIssues).toHaveLength(2);
   });
 
-  it("orphaned episode with invalid season_id detected", () => {
+  it("orphaned episode with invalid season_id detected", async () => {
     // Create a show and season
     db.prepare(
       "INSERT INTO tv_shows (title, year, folder_path) VALUES (?, ?, ?)",
@@ -224,7 +224,7 @@ describe("health report", () => {
     ).run(9999, orphanMediaId, 1);
     db.pragma("foreign_keys = ON");
 
-    const report = generateHealthReport(db);
+    const report = await generateHealthReport(db);
     expect(report.summary.orphaned_entries).toBeGreaterThanOrEqual(1);
     const orphanIssues = report.issues.filter((i) => i.type === "orphaned");
     expect(orphanIssues.length).toBeGreaterThanOrEqual(1);
@@ -260,8 +260,8 @@ describe("health report", () => {
     expect(after.c).toBe(0);
   });
 
-  it("missing files detected for nonexistent paths", () => {
-    const missing = getMissingFiles(db);
+  it("missing files detected for nonexistent paths", async () => {
+    const missing = await getMissingFiles(db);
     // All 5 items have nonexistent paths
     expect(missing).toHaveLength(5);
     expect(missing[0].type).toBe("missing_file");

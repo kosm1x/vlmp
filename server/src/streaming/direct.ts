@@ -1,4 +1,5 @@
-import { createReadStream, statSync } from "node:fs";
+import { createReadStream } from "node:fs";
+import { stat } from "node:fs/promises";
 import type { FastifyReply, FastifyRequest } from "fastify";
 
 const MIME_TYPES: Record<string, string> = {
@@ -34,13 +35,13 @@ export function canDirectPlay(
   return containerOk && videoOk && audioOk;
 }
 
-export function serveDirectFile(
+export async function serveDirectFile(
   filePath: string,
   request: FastifyRequest,
   reply: FastifyReply,
-): void {
-  const stat = statSync(filePath);
-  const fileSize = stat.size;
+): Promise<void> {
+  const fileStat = await stat(filePath);
+  const fileSize = fileStat.size;
   const ext = filePath.substring(filePath.lastIndexOf(".")).toLowerCase();
   const contentType = MIME_TYPES[ext] || "application/octet-stream";
   const range = request.headers.range;
