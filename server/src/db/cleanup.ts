@@ -5,7 +5,6 @@ const AI_CACHE_MAX_AGE_SECONDS = 7 * 24 * 60 * 60; // 7 days
 
 export function runCleanup(db: Database.Database): void {
   const cleanup = db.transaction(() => {
-    db.prepare("DELETE FROM sessions WHERE expires_at < unixepoch()").run();
     db.prepare("DELETE FROM guest_passes WHERE expires_at < unixepoch()").run();
     db.prepare(
       "DELETE FROM federation_invites WHERE expires_at < unixepoch()",
@@ -13,6 +12,10 @@ export function runCleanup(db: Database.Database): void {
     db.prepare("DELETE FROM ai_cache WHERE computed_at < unixepoch() - ?").run(
       AI_CACHE_MAX_AGE_SECONDS,
     );
+    // Clean old viewing_log entries (W4 — keep 90 days)
+    db.prepare(
+      "DELETE FROM viewing_log WHERE watched_at < unixepoch() - 7776000",
+    ).run();
   });
   cleanup();
 }

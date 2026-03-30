@@ -10,13 +10,6 @@ CREATE TABLE IF NOT EXISTS users (
   role TEXT NOT NULL DEFAULT 'user',
   created_at INTEGER NOT NULL DEFAULT (unixepoch())
 );
-CREATE TABLE IF NOT EXISTS sessions (
-  id INTEGER PRIMARY KEY,
-  user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
-  refresh_token TEXT UNIQUE NOT NULL,
-  expires_at INTEGER NOT NULL,
-  created_at INTEGER NOT NULL DEFAULT (unixepoch())
-);
 CREATE TABLE IF NOT EXISTS library_folders (
   id INTEGER PRIMARY KEY,
   path TEXT UNIQUE NOT NULL,
@@ -193,7 +186,7 @@ CREATE INDEX IF NOT EXISTS idx_media_added_at ON media_items(added_at);
 CREATE INDEX IF NOT EXISTS idx_episodes_season ON episodes(season_id);
 CREATE INDEX IF NOT EXISTS idx_subtitles_media ON subtitles(media_id);
 CREATE INDEX IF NOT EXISTS idx_guest_code ON guest_passes(code);
-CREATE INDEX IF NOT EXISTS idx_sessions_user ON sessions(user_id);
+CREATE INDEX IF NOT EXISTS idx_watch_progress_user_media ON watch_progress(user_id, media_id);
 CREATE INDEX IF NOT EXISTS idx_federated_status ON federated_servers(status);
 CREATE INDEX IF NOT EXISTS idx_viewing_log_user_completed ON viewing_log(user_id, completed, watched_at);
 CREATE INDEX IF NOT EXISTS idx_viewing_log_media ON viewing_log(media_id);

@@ -10,7 +10,7 @@ export function loadOrGenerateFingerprint(dataDir: string): string {
     return readFileSync(keyPath, "utf-8").trim();
   }
   const fingerprint = randomBytes(32).toString("hex");
-  writeFileSync(keyPath, fingerprint, "utf-8");
+  writeFileSync(keyPath, fingerprint, { encoding: "utf-8", mode: 0o600 });
   return fingerprint;
 }
 

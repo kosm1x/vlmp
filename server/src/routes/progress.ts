@@ -3,6 +3,7 @@ import type Database from "better-sqlite3";
 import type { Config } from "../config.js";
 import { authMiddleware } from "../auth/middleware.js";
 import { logViewingEvent } from "../ai/viewing-log.js";
+import { parseIntParam } from "./params.js";
 
 export function registerProgressRoutes(
   app: FastifyInstance,
@@ -16,7 +17,7 @@ export function registerProgressRoutes(
     { preHandler: auth },
     async (request) => {
       const userId = parseInt(request.user!.sub, 10);
-      const mediaId = parseInt(request.params.mediaId, 10);
+      const mediaId = parseIntParam(request.params.mediaId, "mediaId");
       const progress = db
         .prepare(
           "SELECT * FROM watch_progress WHERE user_id = ? AND media_id = ?",
@@ -47,7 +48,7 @@ export function registerProgressRoutes(
     },
     async (request, reply) => {
       const userId = parseInt(request.user!.sub, 10);
-      const mediaId = parseInt(request.params.mediaId, 10);
+      const mediaId = parseIntParam(request.params.mediaId, "mediaId");
       const media = db
         .prepare("SELECT id FROM media_items WHERE id = ?")
         .get(mediaId);

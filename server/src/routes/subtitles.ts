@@ -15,6 +15,7 @@ import {
 } from "../subtitles/service.js";
 import { extractSubtitles } from "../subtitles/extract.js";
 import { probeFile } from "../scanner/probe.js";
+import { parseIntParam } from "./params.js";
 
 export function registerSubtitleRoutes(
   app: FastifyInstance,
@@ -27,7 +28,7 @@ export function registerSubtitleRoutes(
     "/subtitles/:mediaId",
     { preHandler: auth },
     async (request) => {
-      const mediaId = parseInt(request.params.mediaId, 10);
+      const mediaId = parseIntParam(request.params.mediaId, "mediaId");
       return getSubtitlesForMedia(db, mediaId);
     },
   );
@@ -60,7 +61,7 @@ export function registerSubtitleRoutes(
     );
     if (!valid)
       return reply.code(401).send({ error: "Invalid or expired token" });
-    const subtitleId = parseInt(request.params.subtitleId, 10);
+    const subtitleId = parseIntParam(request.params.subtitleId, "subtitleId");
     const sub = db
       .prepare("SELECT * FROM subtitles WHERE id = ?")
       .get(subtitleId) as Subtitle | undefined;
@@ -85,7 +86,7 @@ export function registerSubtitleRoutes(
     "/admin/subtitles/:mediaId/extract",
     { preHandler: [auth, adminOnly] },
     async (request, reply) => {
-      const mediaId = parseInt(request.params.mediaId, 10);
+      const mediaId = parseIntParam(request.params.mediaId, "mediaId");
       const media = db
         .prepare("SELECT file_path FROM media_items WHERE id = ?")
         .get(mediaId) as { file_path: string } | undefined;

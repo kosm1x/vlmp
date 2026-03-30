@@ -8,43 +8,64 @@ Personal media server with a robust backend and an ultra-light Netflix-like web 
 
 ## Tech Stack
 
-| Layer | Technology | Rationale |
-|-------|-----------|-----------|
-| Runtime | Node.js 22 + TypeScript 5 | Proven, streaming APIs, FFmpeg interop |
-| HTTP | Fastify 5 | Lightweight, fast, schema validation |
-| Database | SQLite via better-sqlite3 | Zero-config, single-file, proven (crm-azteca) |
-| Transcoding | FFmpeg (system binary) | Industry standard, HLS, adaptive bitrate |
-| Client | Preact + HTM | 3KB, no build step, React-compatible |
-| Video Player | HLS.js | Adaptive bitrate streaming in browser |
-| Auth | JWT (jose) + bcrypt | Stateless, federation-compatible |
-| Metadata | TMDb API | Movie/TV posters, descriptions, ratings |
-| Subtitles | OpenSubtitles API | Web search for missing subtitles |
-| Build | esbuild | Fast bundler for client assets |
+| Layer        | Technology                | Rationale                                     |
+| ------------ | ------------------------- | --------------------------------------------- |
+| Runtime      | Node.js 22 + TypeScript 5 | Proven, streaming APIs, FFmpeg interop        |
+| HTTP         | Fastify 5                 | Lightweight, fast, schema validation          |
+| Database     | SQLite via better-sqlite3 | Zero-config, single-file, proven (crm-azteca) |
+| Transcoding  | FFmpeg (system binary)    | Industry standard, HLS, adaptive bitrate      |
+| Client       | Preact + HTM              | 3KB, no build step, React-compatible          |
+| Video Player | HLS.js                    | Adaptive bitrate streaming in browser         |
+| Auth         | JWT (jose) + bcrypt       | Stateless, federation-compatible              |
+| Metadata     | TMDb API                  | Movie/TV posters, descriptions, ratings       |
+| Subtitles    | OpenSubtitles API         | Web search for missing subtitles              |
+| Build        | esbuild                   | Fast bundler for client assets                |
 
 ---
 
 ## Implementation Phases
 
 ### Phase 1: Foundation -- COMPLETE
+
 Server scaffold, auth, scanner, classifier, probe, library CRUD, TV hierarchy.
 
 ### Phase 2: Core Playback -- COMPLETE
+
 Direct play, HLS transcoding (1080p/720p/480p/360p), adaptive bitrate, session manager, client player with full controls.
 
 ### Phase 3: Client UI -- COMPLETE (merged into Phase 2)
+
 Netflix-like browse, category rows, search, responsive layout, login/register.
 
 ### Phase 4: Media Management -- COMPLETE
+
 TMDb metadata (auto-match on scan, manual match, batch scan, 30-day cache), subtitle extraction (FFmpeg VTT demux, bitmap codec skip), playlists (CRUD, ownership, reorder).
 
 ### Phase 5: Sharing & Federation -- COMPLETE
+
 HMAC-SHA256 server auth, 2-step invite linking, remote library browsing (proxied), remote HLS playback with M3U8 rewriting, 5-min heartbeat health monitoring. Zero new dependencies.
 
 ### Phase 6: Hardening & Polish -- COMPLETE
+
 Security headers (CSP, X-Frame-Options, nosniff, Referrer-Policy, Permissions-Policy), global rate limiting (120/min baseline), 1MB body limit, log redaction. Subtitle auth migrated from JWT-in-URL to short-lived HMAC tokens (5min TTL). Guest pass entropy doubled (64-bit), validation wrapped in transaction (TOCTOU fix), rate-limited. Fastify JSON schema validation on all POST/PUT routes. FFmpeg dash-prefix input validation. Federation browse routes restricted to admin. Startup config validation (port, publicUrl, TMDB key warning). Client: favicon, meta tags, ARIA labels, 404 route, error boundary, WCAG AA contrast fix.
 
 ### Phase 7: AI Assistant -- COMPLETE
+
 Algorithmic recommendations (5-strategy engine: next episode, collaborative filtering, genre matching, similar items, popularity fallback). Viewing history tracking with 5-min dedup. User preferences (like/dislike) with recommendation cache invalidation. Library health dashboard (8 checks: missing files, zero-byte, metadata gaps, no subtitles, codec/resolution analysis, orphaned entries, duplicates) with admin cleanup. Zero external AI dependencies.
+
+---
+
+### QA Security Audit -- COMPLETE (2026-03-30)
+
+Full codebase audit with 27 remediations across 4 severity levels. Key fixes: JWT guard bypass, federation session CSPRNG, server.key permissions, parseIntParam validation across all routes, orphan cleanup, FFprobe buffer cap, guest pass check/consume separation, federation TV path stripping, session user ownership, LIKE injection escape, federation body schemas, metadata scan mutex, CDN pinning, HSTS header. 173 tests passing.
+
+### UI Design Direction -- IN PROGRESS
+
+Evaluated 6 concepts (Projectionist, Signal, Lumiere, Broadcast, Acetate, Oxide). Two approved:
+
+- **Lumiere Dark** -- Warm dark (#0c0b0a), Libre Bodoni + Public Sans, 3-card masonry feature strip, spring-lift cards (8px radius), frosted glass nav
+- **Oxide** -- Hi-Fi faceplate metaphor, Cormorant Garamond + Space Grotesk + Space Mono, amber accent (#d4951a), cassette corner-notch cards (clip-path), VU meters, 7-segment time counter
+  Preview files: `client/public/previews/`
 
 ---
 

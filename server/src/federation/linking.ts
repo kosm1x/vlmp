@@ -28,34 +28,37 @@ export function handleLink(
   fingerprint: string;
   public_url: string;
 } {
-  const invite = db
-    .prepare("SELECT * FROM federation_invites WHERE token = ?")
-    .get(inviteToken) as
-    | { id: number; token: string; expires_at: number; used: number }
-    | undefined;
+  const link = db.transaction(() => {
+    const invite = db
+      .prepare("SELECT * FROM federation_invites WHERE token = ?")
+      .get(inviteToken) as
+      | { id: number; token: string; expires_at: number; used: number }
+      | undefined;
 
-  if (!invite) throw new Error("Invalid invite token");
-  if (invite.used) throw new Error("Invite already used");
+    if (!invite) throw new Error("Invalid invite token");
+    if (invite.used) throw new Error("Invite already used");
 
-  const now = Math.floor(Date.now() / 1000);
-  if (invite.expires_at < now) throw new Error("Invite expired");
+    const now = Math.floor(Date.now() / 1000);
+    if (invite.expires_at < now) throw new Error("Invite expired");
 
-  const shared_secret = generateSecret();
+    const shared_secret = generateSecret();
 
-  db.prepare("UPDATE federation_invites SET used = 1 WHERE id = ?").run(
-    invite.id,
-  );
+    db.prepare("UPDATE federation_invites SET used = 1 WHERE id = ?").run(
+      invite.id,
+    );
 
-  db.prepare(
-    "INSERT INTO federated_servers (name, url, public_key, shared_secret, status, last_seen) VALUES (?, ?, ?, ?, 'active', unixepoch())",
-  ).run(remoteName, remoteUrl, remoteFingerprint, shared_secret);
+    db.prepare(
+      "INSERT INTO federated_servers (name, url, public_key, shared_secret, status, last_seen) VALUES (?, ?, ?, ?, 'active', unixepoch())",
+    ).run(remoteName, remoteUrl, remoteFingerprint, shared_secret);
 
-  return {
-    shared_secret,
-    name: serverName,
-    fingerprint: serverFingerprint,
-    public_url: serverPublicUrl,
-  };
+    return {
+      shared_secret,
+      name: serverName,
+      fingerprint: serverFingerprint,
+      public_url: serverPublicUrl,
+    };
+  });
+  return link();
 }
 
 export function removeFederatedServer(

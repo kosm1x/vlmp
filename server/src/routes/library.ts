@@ -15,6 +15,7 @@ import {
   type LibraryFolder,
 } from "../media/library.js";
 import type { MediaCategory } from "../scanner/classify.js";
+import { parseIntParam } from "./params.js";
 
 export function registerLibraryRoutes(
   app: FastifyInstance,
@@ -57,7 +58,7 @@ export function registerLibraryRoutes(
     "/library/:id",
     { preHandler: auth },
     async (request, reply) => {
-      const item = getMediaItem(db, parseInt(request.params.id, 10));
+      const item = getMediaItem(db, parseIntParam(request.params.id, "id"));
       if (!item) return reply.code(404).send({ error: "Not found" });
       return item;
     },
@@ -71,7 +72,10 @@ export function registerLibraryRoutes(
     "/library/tv/shows/:id",
     { preHandler: auth },
     async (request, reply) => {
-      const result = getTVShowDetail(db, parseInt(request.params.id, 10));
+      const result = getTVShowDetail(
+        db,
+        parseIntParam(request.params.id, "id"),
+      );
       if (!result) return reply.code(404).send({ error: "Show not found" });
       return result;
     },
@@ -117,7 +121,9 @@ export function registerLibraryRoutes(
     "/admin/folders/:id",
     { preHandler: [auth, adminOnly] },
     async (request, reply) => {
-      removeLibraryFolder(db, parseInt(request.params.id, 10));
+      const folderId = parseIntParam(request.params.id, "id");
+      const existed = removeLibraryFolder(db, folderId);
+      if (!existed) return reply.code(404).send({ error: "Folder not found" });
       return reply.code(204).send();
     },
   );
@@ -126,7 +132,7 @@ export function registerLibraryRoutes(
     "/admin/folders/:id/scan",
     { preHandler: [auth, adminOnly] },
     async (request, reply) => {
-      const id = parseInt(request.params.id, 10);
+      const id = parseIntParam(request.params.id, "id");
       const folder = db
         .prepare("SELECT * FROM library_folders WHERE id = ?")
         .get(id) as LibraryFolder | undefined;

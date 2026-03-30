@@ -8,6 +8,9 @@ import {
   matchAndApplyShowMetadata,
   applyManualMatch,
 } from "../metadata/matcher.js";
+import { parseIntParam } from "./params.js";
+
+let metadataScanInProgress = false;
 
 export function registerMetadataRoutes(
   app: FastifyInstance,
@@ -41,7 +44,7 @@ export function registerMetadataRoutes(
     "/admin/metadata/:id/match",
     { preHandler: [auth, adminOnly] },
     async (request, reply) => {
-      const mediaId = parseInt(request.params.id, 10);
+      const mediaId = parseIntParam(request.params.id, "id");
       if (!config.tmdbApiKey)
         return reply.code(503).send({ error: "TMDb API key not configured" });
       const { tmdb_id, media_type } = request.body || {};
@@ -67,25 +70,34 @@ export function registerMetadataRoutes(
     async (request, reply) => {
       if (!config.tmdbApiKey)
         return reply.code(503).send({ error: "TMDb API key not configured" });
-      const { folder_id } = request.body || {};
-      const condition = folder_id ? "WHERE library_folder_id = ?" : "";
-      const params = folder_id ? [folder_id] : [];
-      const items = db
-        .prepare(`SELECT id FROM media_items ${condition}`)
-        .all(...params) as { id: number }[];
-      let matched = 0;
-      let failed = 0;
-      for (const item of items) {
-        try {
-          const result = await matchAndApplyMetadata(db, item.id, config);
-          if (result) matched++;
-          // Throttle: 300ms between requests (respects TMDb ~40 req/10s limit)
-          await new Promise((r) => setTimeout(r, 300));
-        } catch {
-          failed++;
+      if (metadataScanInProgress)
+        return reply
+          .code(409)
+          .send({ error: "Metadata scan already in progress" });
+      metadataScanInProgress = true;
+      try {
+        const { folder_id } = request.body || {};
+        const condition = folder_id ? "WHERE library_folder_id = ?" : "";
+        const params = folder_id ? [folder_id] : [];
+        const items = db
+          .prepare(`SELECT id FROM media_items ${condition}`)
+          .all(...params) as { id: number }[];
+        let matched = 0;
+        let failed = 0;
+        for (const item of items) {
+          try {
+            const result = await matchAndApplyMetadata(db, item.id, config);
+            if (result) matched++;
+            // Throttle: 300ms between requests (respects TMDb ~40 req/10s limit)
+            await new Promise((r) => setTimeout(r, 300));
+          } catch {
+            failed++;
+          }
         }
+        return { total: items.length, matched, failed };
+      } finally {
+        metadataScanInProgress = false;
       }
-      return { total: items.length, matched, failed };
     },
   );
 
@@ -93,7 +105,7 @@ export function registerMetadataRoutes(
     "/admin/metadata/tv/:showId/match",
     { preHandler: [auth, adminOnly] },
     async (request, reply) => {
-      const showId = parseInt(request.params.showId, 10);
+      const showId = parseIntParam(request.params.showId, "showId");
       if (!config.tmdbApiKey)
         return reply.code(503).send({ error: "TMDb API key not configured" });
       const matched = await matchAndApplyShowMetadata(db, showId, config);

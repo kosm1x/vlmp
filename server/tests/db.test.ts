@@ -22,7 +22,6 @@ describe("schema", () => {
     const names = tables.map((t) => t.name);
     for (const t of [
       "users",
-      "sessions",
       "guest_passes",
       "library_folders",
       "media_items",
@@ -69,9 +68,9 @@ describe("schema", () => {
     expect(() =>
       db
         .prepare(
-          "INSERT INTO sessions (user_id, refresh_token, expires_at) VALUES (?, ?, ?)",
+          "INSERT INTO watch_progress (user_id, media_id, position_seconds) VALUES (?, ?, ?)",
         )
-        .run(999, "tok", 0),
+        .run(999, 1, 0),
     ).toThrow();
   });
   it("cascades user deletion", () => {
@@ -83,11 +82,17 @@ describe("schema", () => {
       .prepare("SELECT id FROM users WHERE username = ?")
       .get("bob") as { id: number };
     db.prepare(
-      "INSERT INTO sessions (user_id, refresh_token, expires_at) VALUES (?, ?, ?)",
-    ).run(user.id, "tok1", 9999999999);
+      "INSERT INTO media_items (type, file_path, title) VALUES (?, ?, ?)",
+    ).run("movie", "/tmp/test.mp4", "Test");
+    const media = db
+      .prepare("SELECT id FROM media_items WHERE file_path = ?")
+      .get("/tmp/test.mp4") as { id: number };
+    db.prepare(
+      "INSERT INTO watch_progress (user_id, media_id, position_seconds) VALUES (?, ?, ?)",
+    ).run(user.id, media.id, 42);
     db.prepare("DELETE FROM users WHERE id = ?").run(user.id);
     expect(
-      db.prepare("SELECT * FROM sessions WHERE user_id = ?").all(user.id),
+      db.prepare("SELECT * FROM watch_progress WHERE user_id = ?").all(user.id),
     ).toHaveLength(0);
   });
 });

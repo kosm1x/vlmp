@@ -98,6 +98,12 @@ export function addToPlaylist(
     .get(playlistId, userId);
   if (!playlist) return null;
 
+  // Verify media exists (friendlier than FK violation 500)
+  const media = db
+    .prepare("SELECT id FROM media_items WHERE id = ?")
+    .get(mediaId);
+  if (!media) return null;
+
   const maxPos = db
     .prepare(
       "SELECT COALESCE(MAX(position), 0) as max_pos FROM playlist_items WHERE playlist_id = ?",

@@ -1,3 +1,4 @@
+import { randomBytes } from "node:crypto";
 import { federatedFetch } from "./client.js";
 import type { Config } from "../config.js";
 
@@ -15,6 +16,7 @@ interface FedStreamSession {
   remoteSessionId: string;
   remoteBaseUrl: string;
   server: FederatedServer;
+  userId: string;
 }
 
 const fedStreamSessions = new Map<string, FedStreamSession>();
@@ -29,7 +31,12 @@ export function cleanupFedStreamSession(sessionId: string): void {
   fedStreamSessions.delete(sessionId);
 }
 
-const SENSITIVE_FIELDS = ["file_path", "file_size", "library_folder_id"];
+const SENSITIVE_FIELDS = [
+  "file_path",
+  "file_size",
+  "library_folder_id",
+  "folder_path",
+];
 
 export function stripSensitiveFields(
   item: Record<string, unknown>,
@@ -100,6 +107,7 @@ export async function proxyStreamStart(
   config: Config,
   mediaId: string,
   body: unknown,
+  userId: string,
 ): Promise<Record<string, unknown>> {
   const res = await federatedFetch(
     server,
@@ -112,12 +120,13 @@ export async function proxyStreamStart(
   const data = (await res.json()) as Record<string, unknown>;
 
   // Generate a local session ID and track the remote session
-  const localSessionId = `fed-${server.id}-${Date.now()}`;
+  const localSessionId = `fed-${randomBytes(16).toString("hex")}`;
   fedStreamSessions.set(localSessionId, {
     serverId: server.id,
     remoteSessionId: data.session_id as string,
     remoteBaseUrl: server.url.replace(/\/$/, ""),
     server,
+    userId,
   });
 
   // Rewrite the URL to point through our proxy

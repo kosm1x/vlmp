@@ -25,34 +25,42 @@ export function startHeartbeatLoop(
         )
         .all() as ServerRow[];
 
-      for (const server of servers) {
-        try {
-          const res = await federatedFetch(
-            server,
-            config,
-            "POST",
-            "/federation/heartbeat",
-            { name: config.serverName },
-          );
+      // Clean up failureCounts for removed servers
+      const activeIds = new Set(servers.map((s) => s.id));
+      for (const id of failureCounts.keys()) {
+        if (!activeIds.has(id)) failureCounts.delete(id);
+      }
 
-          if (res.ok) {
-            failureCounts.set(server.id, 0);
-            if (server.status === "offline") {
-              db.prepare(
-                "UPDATE federated_servers SET status = 'active', last_seen = unixepoch() WHERE id = ?",
-              ).run(server.id);
+      await Promise.allSettled(
+        servers.map(async (server) => {
+          try {
+            const res = await federatedFetch(
+              server,
+              config,
+              "POST",
+              "/federation/heartbeat",
+              { name: config.serverName },
+            );
+
+            if (res.ok) {
+              failureCounts.set(server.id, 0);
+              if (server.status === "offline") {
+                db.prepare(
+                  "UPDATE federated_servers SET status = 'active', last_seen = unixepoch() WHERE id = ?",
+                ).run(server.id);
+              } else {
+                db.prepare(
+                  "UPDATE federated_servers SET last_seen = unixepoch() WHERE id = ?",
+                ).run(server.id);
+              }
             } else {
-              db.prepare(
-                "UPDATE federated_servers SET last_seen = unixepoch() WHERE id = ?",
-              ).run(server.id);
+              incrementFailure(db, server);
             }
-          } else {
+          } catch {
             incrementFailure(db, server);
           }
-        } catch {
-          incrementFailure(db, server);
-        }
-      }
+        }),
+      );
     },
     5 * 60 * 1000,
   ); // 5 minutes

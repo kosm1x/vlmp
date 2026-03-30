@@ -19,6 +19,7 @@ import {
   getFedStreamSession,
   cleanupFedStreamSession,
 } from "../federation/proxy.js";
+import { parseIntParam } from "./params.js";
 
 export function registerFederationRoutes(
   app: FastifyInstance,
@@ -53,7 +54,7 @@ export function registerFederationRoutes(
     async (request, reply) => {
       const removed = removeFederatedServer(
         db,
-        parseInt(request.params.id, 10),
+        parseIntParam(request.params.id, "id"),
       );
       if (!removed) return reply.code(404).send({ error: "Server not found" });
       return reply.code(204).send();
@@ -68,39 +69,65 @@ export function registerFederationRoutes(
       url: string;
       fingerprint: string;
     };
-  }>("/federation/link", async (request, reply) => {
-    const { invite_token, name, url, fingerprint } = request.body || {};
-    if (!invite_token || !name || !url || !fingerprint) {
-      return reply.code(400).send({ error: "Missing required fields" });
-    }
+  }>(
+    "/federation/link",
+    {
+      schema: {
+        body: {
+          type: "object",
+          required: ["invite_token", "name", "url", "fingerprint"],
+          properties: {
+            invite_token: { type: "string", minLength: 1, maxLength: 200 },
+            name: { type: "string", minLength: 1, maxLength: 200 },
+            url: { type: "string", minLength: 1, maxLength: 2048 },
+            fingerprint: { type: "string", minLength: 1, maxLength: 200 },
+          },
+          additionalProperties: false,
+        },
+      },
+      config: { rateLimit: { max: 5, timeWindow: "1 minute" } },
+    },
+    async (request, reply) => {
+      const { invite_token, name, url, fingerprint } = request.body;
 
-    try {
-      const result = handleLink(
-        db,
-        config.serverFingerprint,
-        config.serverName,
-        config.publicUrl,
-        url,
-        name,
-        fingerprint,
-        invite_token,
-      );
-      return reply.code(201).send(result);
-    } catch (err: unknown) {
-      const message = err instanceof Error ? err.message : "Link failed";
-      return reply.code(400).send({ error: message });
-    }
-  });
+      try {
+        const result = handleLink(
+          db,
+          config.serverFingerprint,
+          config.serverName,
+          config.publicUrl,
+          url,
+          name,
+          fingerprint,
+          invite_token,
+        );
+        return reply.code(201).send(result);
+      } catch (err: unknown) {
+        const message = err instanceof Error ? err.message : "Link failed";
+        return reply.code(400).send({ error: message });
+      }
+    },
+  );
 
   // Admin: link TO another server (initiates outbound link)
   app.post<{ Body: { url: string; invite_token: string } }>(
     "/federation/link-remote",
-    { preHandler: [auth, adminOnly] },
+    {
+      schema: {
+        body: {
+          type: "object",
+          required: ["url", "invite_token"],
+          properties: {
+            url: { type: "string", minLength: 1, maxLength: 2048 },
+            invite_token: { type: "string", minLength: 1, maxLength: 200 },
+          },
+          additionalProperties: false,
+        },
+      },
+      preHandler: [auth, adminOnly],
+    },
     async (request, reply) => {
-      const { url, invite_token } = request.body || {};
-      if (!url || !invite_token) {
-        return reply.code(400).send({ error: "url and invite_token required" });
-      }
+      const { url, invite_token } = request.body;
 
       const body = JSON.stringify({
         invite_token,
@@ -243,6 +270,7 @@ export function registerFederationRoutes(
           config,
           request.params.mediaId,
           request.body,
+          request.user!.sub,
         );
         return result;
       } catch {
@@ -258,6 +286,8 @@ export function registerFederationRoutes(
     async (request, reply) => {
       const session = getFedStreamSession(request.params.sessionId);
       if (!session)
+        return reply.code(404).send({ error: "Stream session not found" });
+      if (session.userId !== request.user!.sub)
         return reply.code(404).send({ error: "Stream session not found" });
       try {
         const subpath = request.params["*"];
@@ -283,6 +313,8 @@ export function registerFederationRoutes(
     async (request, reply) => {
       const session = getFedStreamSession(request.params.sessionId);
       if (!session)
+        return reply.code(404).send({ error: "Stream session not found" });
+      if (session.userId !== request.user!.sub)
         return reply.code(404).send({ error: "Stream session not found" });
       try {
         await proxyStreamStop(session.server, config, session.remoteSessionId);

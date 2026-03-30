@@ -17,12 +17,12 @@ Personal media server with a robust Node.js backend and an ultra-light Netflix-l
 - **Media detail view** — Full detail page with backdrop, metadata, play button, subtitle list, playlist picker
 - **Server federation** — Link VLMP instances to browse and play remote media, all proxied (NAT-safe)
 - **HMAC-SHA256 federation auth** — Shared secret signing with replay protection, invite-based linking
-- **Security hardened** — CSP, rate limiting, input validation, HMAC subtitle tokens, session ID validation
+- **Security hardened** — CSP, HSTS, rate limiting, input validation, HMAC subtitle tokens, session ID validation, QA-audited (27 fixes)
 - **Algorithmic recommendations** — 5-strategy engine (next episode, collaborative filtering, genre matching, similar items, popularity) with no external AI APIs
 - **User preferences** — Like/dislike with recommendation cache invalidation
 - **Library health dashboard** — 8 checks (missing files, zero-byte, metadata gaps, no subtitles, codec/resolution analysis, orphaned entries, duplicates) with admin cleanup
 - **Ultra-light client** — Preact + HTM loaded from CDN (~3KB framework), no build step
-- **Dark Netflix-like UI** — Responsive grid layout with category browsing, search, ARIA labels
+- **Dark retro-modern UI** — Responsive grid layout with category browsing, search, ARIA labels. Two approved design directions: Lumiere Dark (editorial serif) and Oxide (Hi-Fi faceplate)
 
 ## Requirements
 
@@ -48,29 +48,29 @@ npm run dev
 
 All configuration is via environment variables:
 
-| Variable | Default | Description |
-|----------|---------|-------------|
-| `VLMP_PORT` | `8080` | HTTP server port |
-| `VLMP_HOST` | `0.0.0.0` | Bind address |
-| `VLMP_DATA_DIR` | `./data` | Data directory (database, transcode cache) |
-| `VLMP_JWT_SECRET` | `vlmp-dev-secret-change-me` | JWT signing secret (**change in production**) |
-| `VLMP_JWT_EXPIRES_IN` | `24h` | JWT token lifetime |
-| `VLMP_FFMPEG_PATH` | `ffmpeg` | Path to FFmpeg binary |
-| `VLMP_FFPROBE_PATH` | `ffprobe` | Path to FFprobe binary |
-| `VLMP_TMDB_API_KEY` | *(empty)* | TMDb API key for metadata enrichment |
-| `VLMP_SERVER_NAME` | `VLMP` | Display name for this server in federation |
-| `VLMP_PUBLIC_URL` | *(empty)* | Public URL of this server (for federation linking) |
+| Variable              | Default                     | Description                                        |
+| --------------------- | --------------------------- | -------------------------------------------------- |
+| `VLMP_PORT`           | `8080`                      | HTTP server port                                   |
+| `VLMP_HOST`           | `0.0.0.0`                   | Bind address                                       |
+| `VLMP_DATA_DIR`       | `./data`                    | Data directory (database, transcode cache)         |
+| `VLMP_JWT_SECRET`     | `vlmp-dev-secret-change-me` | JWT signing secret (**change in production**)      |
+| `VLMP_JWT_EXPIRES_IN` | `24h`                       | JWT token lifetime                                 |
+| `VLMP_FFMPEG_PATH`    | `ffmpeg`                    | Path to FFmpeg binary                              |
+| `VLMP_FFPROBE_PATH`   | `ffprobe`                   | Path to FFprobe binary                             |
+| `VLMP_TMDB_API_KEY`   | _(empty)_                   | TMDb API key for metadata enrichment               |
+| `VLMP_SERVER_NAME`    | `VLMP`                      | Display name for this server in federation         |
+| `VLMP_PUBLIC_URL`     | _(empty)_                   | Public URL of this server (for federation linking) |
 
 ## Scripts
 
-| Command | Description |
-|---------|-------------|
-| `npm run dev` | Start dev server with auto-reload (tsx watch) |
-| `npm run build` | Compile TypeScript to `dist/` |
-| `npm start` | Run compiled server |
-| `npm test` | Run test suite (vitest) |
-| `npm run test:watch` | Run tests in watch mode |
-| `npm run typecheck` | Type-check without emitting |
+| Command              | Description                                   |
+| -------------------- | --------------------------------------------- |
+| `npm run dev`        | Start dev server with auto-reload (tsx watch) |
+| `npm run build`      | Compile TypeScript to `dist/`                 |
+| `npm start`          | Run compiled server                           |
+| `npm test`           | Run test suite (vitest)                       |
+| `npm run test:watch` | Run tests in watch mode                       |
+| `npm run typecheck`  | Type-check without emitting                   |
 
 ## Architecture
 
@@ -86,7 +86,7 @@ vlmp/
 │   │   └── guest.ts          # Guest pass creation/validation
 │   ├── db/
 │   │   ├── index.ts          # SQLite singleton (WAL, sync=NORMAL, 8MB cache)
-│   │   ├── schema.ts         # 21 tables, 17 indexes
+│   │   ├── schema.ts         # 20 tables, 18 indexes
 │   │   └── cleanup.ts        # Hourly expired row cleanup (sessions, invites, cache)
 │   ├── scanner/
 │   │   ├── discover.ts       # Recursive file walker (22 video/audio formats)
@@ -121,6 +121,7 @@ vlmp/
 │   │   ├── recommender.ts    # 5-strategy recommendation engine
 │   │   └── health.ts         # Library health checks + orphan cleanup
 │   └── routes/
+│       ├── params.ts         # Shared route parameter validation
 │       ├── auth.ts           # Register, login, guest pass endpoints
 │       ├── library.ts        # Browse, search, TV shows, admin folder management
 │       ├── metadata.ts       # TMDb search proxy, match, batch scan
@@ -153,124 +154,137 @@ vlmp/
 │           ├── Servers.js    # Federated server list, invite/link admin
 │           ├── ServerBrowse.js # Remote library browser
 │           └── HealthDashboard.js # Admin library health dashboard
-└── server/tests/             # 176 tests across 23 files (vitest)
+├── client/public/previews/   # UI design concept previews (Lumiere, Oxide, etc.)
+└── server/tests/             # 173 tests across 23 files (vitest)
 ```
 
 ## API Overview
 
 ### Authentication
-| Method | Endpoint | Description |
-|--------|----------|-------------|
-| POST | `/auth/register` | Register (first user becomes admin) |
-| POST | `/auth/login` | Login, returns JWT |
-| POST | `/auth/guest` | Create guest pass for a media item |
-| GET | `/auth/guest/:code` | Validate guest pass |
+
+| Method | Endpoint            | Description                         |
+| ------ | ------------------- | ----------------------------------- |
+| POST   | `/auth/register`    | Register (first user becomes admin) |
+| POST   | `/auth/login`       | Login, returns JWT                  |
+| POST   | `/auth/guest`       | Create guest pass for a media item  |
+| GET    | `/auth/guest/:code` | Validate guest pass                 |
 
 ### Library
-| Method | Endpoint | Description |
-|--------|----------|-------------|
-| GET | `/library/browse` | Browse media (filter by type, category, search) |
-| GET | `/library/recent` | Recently added items |
-| GET | `/library/:id` | Single media item |
-| GET | `/library/tv/shows` | All TV shows |
-| GET | `/library/tv/shows/:id` | Show detail with seasons/episodes |
+
+| Method | Endpoint                | Description                                     |
+| ------ | ----------------------- | ----------------------------------------------- |
+| GET    | `/library/browse`       | Browse media (filter by type, category, search) |
+| GET    | `/library/recent`       | Recently added items                            |
+| GET    | `/library/:id`          | Single media item                               |
+| GET    | `/library/tv/shows`     | All TV shows                                    |
+| GET    | `/library/tv/shows/:id` | Show detail with seasons/episodes               |
 
 ### Admin
-| Method | Endpoint | Description |
-|--------|----------|-------------|
-| GET | `/admin/folders` | List library folders |
-| POST | `/admin/folders` | Add library folder (path + category) |
-| DELETE | `/admin/folders/:id` | Remove library folder |
-| POST | `/admin/folders/:id/scan` | Trigger folder scan |
-| POST | `/admin/metadata/:id/match` | Auto or manual TMDb match |
-| POST | `/admin/metadata/scan` | Batch match all unmatched items |
-| POST | `/admin/metadata/tv/:showId/match` | Match a TV show |
-| POST | `/admin/subtitles/:mediaId/extract` | Manually trigger subtitle extraction |
+
+| Method | Endpoint                            | Description                          |
+| ------ | ----------------------------------- | ------------------------------------ |
+| GET    | `/admin/folders`                    | List library folders                 |
+| POST   | `/admin/folders`                    | Add library folder (path + category) |
+| DELETE | `/admin/folders/:id`                | Remove library folder                |
+| POST   | `/admin/folders/:id/scan`           | Trigger folder scan                  |
+| POST   | `/admin/metadata/:id/match`         | Auto or manual TMDb match            |
+| POST   | `/admin/metadata/scan`              | Batch match all unmatched items      |
+| POST   | `/admin/metadata/tv/:showId/match`  | Match a TV show                      |
+| POST   | `/admin/subtitles/:mediaId/extract` | Manually trigger subtitle extraction |
 
 ### Metadata
-| Method | Endpoint | Description |
-|--------|----------|-------------|
-| GET | `/metadata/search` | Proxy TMDb search (query: `q`, `type`, `year`) |
+
+| Method | Endpoint           | Description                                    |
+| ------ | ------------------ | ---------------------------------------------- |
+| GET    | `/metadata/search` | Proxy TMDb search (query: `q`, `type`, `year`) |
 
 ### Subtitles
-| Method | Endpoint | Description |
-|--------|----------|-------------|
-| GET | `/subtitles/:mediaId` | List subtitles for media item |
-| GET | `/subtitles/:mediaId/:subtitleId/token` | Get short-lived HMAC token for file access |
-| GET | `/subtitles/:mediaId/:subtitleId/file` | Serve VTT file (HMAC token in query) |
+
+| Method | Endpoint                                | Description                                |
+| ------ | --------------------------------------- | ------------------------------------------ |
+| GET    | `/subtitles/:mediaId`                   | List subtitles for media item              |
+| GET    | `/subtitles/:mediaId/:subtitleId/token` | Get short-lived HMAC token for file access |
+| GET    | `/subtitles/:mediaId/:subtitleId/file`  | Serve VTT file (HMAC token in query)       |
 
 ### Playlists
-| Method | Endpoint | Description |
-|--------|----------|-------------|
-| GET | `/playlists` | List user's playlists |
-| POST | `/playlists` | Create playlist |
-| GET | `/playlists/:id` | Get playlist with items |
-| PUT | `/playlists/:id` | Rename playlist |
-| DELETE | `/playlists/:id` | Delete playlist |
-| POST | `/playlists/:id/items` | Add item to playlist |
-| DELETE | `/playlists/:id/items/:itemId` | Remove item |
-| PUT | `/playlists/:id/reorder` | Reorder items |
+
+| Method | Endpoint                       | Description             |
+| ------ | ------------------------------ | ----------------------- |
+| GET    | `/playlists`                   | List user's playlists   |
+| POST   | `/playlists`                   | Create playlist         |
+| GET    | `/playlists/:id`               | Get playlist with items |
+| PUT    | `/playlists/:id`               | Rename playlist         |
+| DELETE | `/playlists/:id`               | Delete playlist         |
+| POST   | `/playlists/:id/items`         | Add item to playlist    |
+| DELETE | `/playlists/:id/items/:itemId` | Remove item             |
+| PUT    | `/playlists/:id/reorder`       | Reorder items           |
 
 ### Playback
-| Method | Endpoint | Description |
-|--------|----------|-------------|
-| POST | `/stream/:id/start` | Start stream session (direct or transcode) |
-| GET | `/stream/:sessionId/direct` | Direct file stream (byte-range) |
-| GET | `/stream/:sessionId/master.m3u8` | HLS master playlist |
-| GET | `/stream/:sessionId/:profile/playlist.m3u8` | HLS variant playlist |
-| GET | `/stream/:sessionId/:profile/:segment` | HLS video segment |
-| DELETE | `/stream/:sessionId` | End stream session |
+
+| Method | Endpoint                                    | Description                                |
+| ------ | ------------------------------------------- | ------------------------------------------ |
+| POST   | `/stream/:id/start`                         | Start stream session (direct or transcode) |
+| GET    | `/stream/:sessionId/direct`                 | Direct file stream (byte-range)            |
+| GET    | `/stream/:sessionId/master.m3u8`            | HLS master playlist                        |
+| GET    | `/stream/:sessionId/:profile/playlist.m3u8` | HLS variant playlist                       |
+| GET    | `/stream/:sessionId/:profile/:segment`      | HLS video segment                          |
+| DELETE | `/stream/:sessionId`                        | End stream session                         |
 
 ### Progress
-| Method | Endpoint | Description |
-|--------|----------|-------------|
-| GET | `/progress/:mediaId` | Get watch progress |
-| PUT | `/progress/:mediaId` | Update watch position |
-| GET | `/progress/continue` | "Continue watching" list |
+
+| Method | Endpoint             | Description              |
+| ------ | -------------------- | ------------------------ |
+| GET    | `/progress/:mediaId` | Get watch progress       |
+| PUT    | `/progress/:mediaId` | Update watch position    |
+| GET    | `/progress/continue` | "Continue watching" list |
 
 ### Recommendations & Preferences
-| Method | Endpoint | Description |
-|--------|----------|-------------|
-| GET | `/recommendations` | Personalized recommendations (cached 1hr) |
-| POST | `/recommendations/refresh` | Force recompute recommendations |
-| GET | `/recommendations/similar/:mediaId` | Similar items |
-| POST | `/preferences/:mediaId` | Set like/dislike preference |
-| DELETE | `/preferences/:mediaId` | Remove preference |
-| GET | `/preferences` | List user preferences |
+
+| Method | Endpoint                            | Description                               |
+| ------ | ----------------------------------- | ----------------------------------------- |
+| GET    | `/recommendations`                  | Personalized recommendations (cached 1hr) |
+| POST   | `/recommendations/refresh`          | Force recompute recommendations           |
+| GET    | `/recommendations/similar/:mediaId` | Similar items                             |
+| POST   | `/preferences/:mediaId`             | Set like/dislike preference               |
+| DELETE | `/preferences/:mediaId`             | Remove preference                         |
+| GET    | `/preferences`                      | List user preferences                     |
 
 ### Library Health (Admin)
-| Method | Endpoint | Description |
-|--------|----------|-------------|
-| GET | `/admin/health` | Full library health report |
-| GET | `/admin/health/missing` | Missing files list |
-| POST | `/admin/health/cleanup` | Remove orphaned database entries |
+
+| Method | Endpoint                | Description                      |
+| ------ | ----------------------- | -------------------------------- |
+| GET    | `/admin/health`         | Full library health report       |
+| GET    | `/admin/health/missing` | Missing files list               |
+| POST   | `/admin/health/cleanup` | Remove orphaned database entries |
 
 ### Federation (Admin / Proxy)
-| Method | Endpoint | Auth | Description |
-|--------|----------|------|-------------|
-| GET | `/federation/servers` | JWT+admin | List linked servers |
-| POST | `/federation/invite` | JWT+admin | Generate invite token (1hr expiry) |
-| DELETE | `/federation/servers/:id` | JWT+admin | Remove a linked server |
-| POST | `/federation/link` | invite token | Receive link request from remote |
-| POST | `/federation/link-remote` | JWT+admin | Initiate link to another server |
-| GET | `/federation/servers/:id/library` | JWT+admin | Browse remote library (proxied) |
-| GET | `/federation/servers/:id/media/:mediaId` | JWT+admin | Remote media detail (proxied) |
-| GET | `/federation/servers/:id/tv/shows` | JWT+admin | Remote TV shows (proxied) |
-| POST | `/federation/servers/:id/stream/:mediaId/start` | JWT | Start remote playback |
-| GET | `/federation/servers/:id/stream/:sessionId/*` | JWT | Proxy HLS content |
-| DELETE | `/federation/servers/:id/stream/:sessionId` | JWT | Stop remote playback |
+
+| Method | Endpoint                                        | Auth         | Description                        |
+| ------ | ----------------------------------------------- | ------------ | ---------------------------------- |
+| GET    | `/federation/servers`                           | JWT+admin    | List linked servers                |
+| POST   | `/federation/invite`                            | JWT+admin    | Generate invite token (1hr expiry) |
+| DELETE | `/federation/servers/:id`                       | JWT+admin    | Remove a linked server             |
+| POST   | `/federation/link`                              | invite token | Receive link request from remote   |
+| POST   | `/federation/link-remote`                       | JWT+admin    | Initiate link to another server    |
+| GET    | `/federation/servers/:id/library`               | JWT+admin    | Browse remote library (proxied)    |
+| GET    | `/federation/servers/:id/media/:mediaId`        | JWT+admin    | Remote media detail (proxied)      |
+| GET    | `/federation/servers/:id/tv/shows`              | JWT+admin    | Remote TV shows (proxied)          |
+| POST   | `/federation/servers/:id/stream/:mediaId/start` | JWT          | Start remote playback              |
+| GET    | `/federation/servers/:id/stream/:sessionId/*`   | JWT          | Proxy HLS content                  |
+| DELETE | `/federation/servers/:id/stream/:sessionId`     | JWT          | Stop remote playback               |
 
 ### Federation API (Peer-to-Peer, HMAC auth)
-| Method | Endpoint | Description |
-|--------|----------|-------------|
-| GET | `/federation/api/library` | Browse library (stripped) |
-| GET | `/federation/api/media/:id` | Media detail (stripped) |
-| GET | `/federation/api/tv/shows` | TV show list |
-| GET | `/federation/api/tv/shows/:id` | Show detail |
-| POST | `/federation/heartbeat` | Health ping |
-| POST | `/federation/api/stream/:id/start` | Start stream |
-| GET | `/federation/api/stream/:sessionId/*` | Serve HLS content |
-| DELETE | `/federation/api/stream/:sessionId` | Stop stream |
+
+| Method | Endpoint                              | Description               |
+| ------ | ------------------------------------- | ------------------------- |
+| GET    | `/federation/api/library`             | Browse library (stripped) |
+| GET    | `/federation/api/media/:id`           | Media detail (stripped)   |
+| GET    | `/federation/api/tv/shows`            | TV show list              |
+| GET    | `/federation/api/tv/shows/:id`        | Show detail               |
+| POST   | `/federation/heartbeat`               | Health ping               |
+| POST   | `/federation/api/stream/:id/start`    | Start stream              |
+| GET    | `/federation/api/stream/:sessionId/*` | Serve HLS content         |
+| DELETE | `/federation/api/stream/:sessionId`   | Stop stream               |
 
 ## Federation
 
@@ -302,20 +316,20 @@ Two VLMP instances can link up so users on Server A can browse and play media fr
 
 VLMP classifies media by folder category. When adding a library folder, assign a category:
 
-| Category | What it expects |
-|----------|----------------|
-| `movies` | `Title (Year).ext` or any standalone video |
-| `tv` | Files with `S01E01`, `1x01` patterns; folders like `Season 1/` |
-| `documentaries` | Single documentary files |
-| `doc_series` | Documentary series with episode patterns |
-| `education` | Numbered lessons (e.g., `01 - Introduction.mp4`) |
-| `other` | Anything else |
+| Category        | What it expects                                                |
+| --------------- | -------------------------------------------------------------- |
+| `movies`        | `Title (Year).ext` or any standalone video                     |
+| `tv`            | Files with `S01E01`, `1x01` patterns; folders like `Season 1/` |
+| `documentaries` | Single documentary files                                       |
+| `doc_series`    | Documentary series with episode patterns                       |
+| `education`     | Numbered lessons (e.g., `01 - Introduction.mp4`)               |
+| `other`         | Anything else                                                  |
 
 ## Database
 
 SQLite with WAL journal mode for concurrent read/write. Tables include:
 
-`users`, `sessions`, `library_folders`, `media_items`, `tv_shows`, `seasons`, `episodes`, `doc_series`, `doc_series_episodes`, `guest_passes`, `watch_progress`, `playlists`, `playlist_items`, `subtitles`, `metadata_cache`, `federated_servers`, `federation_invites`, `viewing_log`, `user_preferences`, `ai_cache`, `schema_version`
+`users`, `library_folders`, `media_items`, `tv_shows`, `seasons`, `episodes`, `doc_series`, `doc_series_episodes`, `guest_passes`, `watch_progress`, `playlists`, `playlist_items`, `subtitles`, `metadata_cache`, `federated_servers`, `federation_invites`, `viewing_log`, `user_preferences`, `ai_cache`, `schema_version`
 
 Database file: `data/vlmp.db`
 
@@ -328,6 +342,8 @@ Database file: `data/vlmp.db`
 - [x] Phase 5 — Federation (HMAC auth, server linking, remote browse/play, heartbeat)
 - [x] Phase 6 — Hardening (security headers, rate limiting, input validation, subtitle auth, a11y)
 - [x] Phase 7 — AI Assistant (algorithmic recommendations, library health dashboard)
+- [x] QA Security Audit — 27 fixes (4 critical, 6 high, 9 medium, 8 low)
+- [ ] UI Redesign — Two approved directions: Lumiere Dark, Oxide (previews at `/previews/`)
 
 ## License
 

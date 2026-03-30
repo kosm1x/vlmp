@@ -49,8 +49,8 @@ const app = Fastify({
 });
 
 if (config.jwtSecret === "vlmp-dev-secret-change-me") {
-  if (process.env.NODE_ENV === "production") {
-    console.error("FATAL: VLMP_JWT_SECRET must be set in production. Exiting.");
+  if (process.env.NODE_ENV !== "development") {
+    console.error("FATAL: VLMP_JWT_SECRET must be set. Exiting.");
     process.exit(1);
   }
   app.log.warn(
@@ -81,6 +81,10 @@ app.addHook("onSend", async (_request, reply, payload) => {
   reply.header(
     "Content-Security-Policy",
     "default-src 'self'; script-src 'self' https://esm.sh https://cdn.jsdelivr.net https://unpkg.com 'unsafe-inline'; style-src 'self' 'unsafe-inline'; img-src 'self' https://image.tmdb.org data:; media-src 'self' blob:; connect-src 'self'; frame-ancestors 'none'",
+  );
+  reply.header(
+    "Strict-Transport-Security",
+    "max-age=31536000; includeSubDomains",
   );
   reply.header("X-Frame-Options", "DENY");
   reply.header("X-Content-Type-Options", "nosniff");

@@ -34,6 +34,8 @@ export async function probeFile(
   return parseProbeOutput(raw);
 }
 
+const MAX_PROBE_STDOUT = 1_048_576; // 1 MB
+
 function runFFprobe(filePath: string, ffprobePath: string): Promise<string> {
   return new Promise((resolve, reject) => {
     const proc = spawn(ffprobePath, [
@@ -48,18 +50,27 @@ function runFFprobe(filePath: string, ffprobePath: string): Promise<string> {
     ]);
     let stdout = "";
     let stderr = "";
+    let killed = false;
     proc.stdout.on("data", (d: Buffer) => {
       stdout += d.toString();
+      if (stdout.length > MAX_PROBE_STDOUT && !killed) {
+        killed = true;
+        proc.kill("SIGTERM");
+        reject(new Error("ffprobe output exceeded 1MB limit"));
+      }
     });
     proc.stderr.on("data", (d: Buffer) => {
       stderr += d.toString();
     });
     proc.on("close", (code) => {
+      if (killed) return;
       code === 0
         ? resolve(stdout)
         : reject(new Error(`ffprobe exit ${code}: ${stderr}`));
     });
-    proc.on("error", reject);
+    proc.on("error", (err) => {
+      if (!killed) reject(err);
+    });
   });
 }
 

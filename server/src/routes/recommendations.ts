@@ -13,6 +13,7 @@ import {
   removePreference,
   getUserPreferences,
 } from "../ai/preferences.js";
+import { parseIntParam } from "./params.js";
 
 interface MediaDetails {
   id: number;
@@ -97,7 +98,7 @@ export function registerRecommendationRoutes(
     "/recommendations/similar/:mediaId",
     { preHandler: auth },
     async (request) => {
-      const mediaId = parseInt(request.params.mediaId, 10);
+      const mediaId = parseIntParam(request.params.mediaId, "mediaId");
       const limit = Math.min(parseInt(request.query.limit || "10", 10), 50);
       const items = getSimilarItems(db, mediaId, limit);
       const enriched = enrichWithMediaDetails(db, items);
@@ -126,7 +127,7 @@ export function registerRecommendationRoutes(
     },
     async (request) => {
       const userId = parseInt(request.user!.sub, 10);
-      const mediaId = parseInt(request.params.mediaId, 10);
+      const mediaId = parseIntParam(request.params.mediaId, "mediaId");
       setPreference(db, userId, mediaId, request.body.action);
       invalidateRecommendationCache(db, userId);
       return { ok: true };
@@ -139,7 +140,7 @@ export function registerRecommendationRoutes(
     { preHandler: auth },
     async (request) => {
       const userId = parseInt(request.user!.sub, 10);
-      const mediaId = parseInt(request.params.mediaId, 10);
+      const mediaId = parseIntParam(request.params.mediaId, "mediaId");
       const removed = removePreference(db, userId, mediaId);
       if (removed) invalidateRecommendationCache(db, userId);
       return { ok: true, removed };

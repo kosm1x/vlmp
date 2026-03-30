@@ -4,7 +4,7 @@ import type { Config } from "../config.js";
 import { hashPassword, verifyPassword } from "../auth/passwords.js";
 import { issueToken } from "../auth/jwt.js";
 import { authMiddleware } from "../auth/middleware.js";
-import { createGuestPass, validateGuestPass } from "../auth/guest.js";
+import { createGuestPass, checkGuestPass } from "../auth/guest.js";
 
 export function registerAuthRoutes(
   app: FastifyInstance,
@@ -133,7 +133,7 @@ export function registerAuthRoutes(
     "/auth/guest/:code",
     { config: { rateLimit: { max: 10, timeWindow: "1 minute" } } },
     async (request, reply) => {
-      const result = validateGuestPass(db, request.params.code);
+      const result = checkGuestPass(db, request.params.code);
       if (!result.valid)
         return reply.code(401).send({ error: "Invalid or expired guest pass" });
       return reply.send({ mediaId: result.mediaId });

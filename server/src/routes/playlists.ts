@@ -12,6 +12,7 @@ import {
   removeFromPlaylist,
   reorderPlaylist,
 } from "../media/playlists.js";
+import { parseIntParam } from "./params.js";
 
 export function registerPlaylistRoutes(
   app: FastifyInstance,
@@ -54,7 +55,7 @@ export function registerPlaylistRoutes(
       const userId = parseInt(request.user!.sub, 10);
       const playlist = getPlaylistWithItems(
         db,
-        parseInt(request.params.id, 10),
+        parseIntParam(request.params.id, "id"),
         userId,
       );
       if (!playlist)
@@ -83,7 +84,7 @@ export function registerPlaylistRoutes(
       const userId = parseInt(request.user!.sub, 10);
       const updated = renamePlaylist(
         db,
-        parseInt(request.params.id, 10),
+        parseIntParam(request.params.id, "id"),
         userId,
         name.trim(),
       );
@@ -100,7 +101,7 @@ export function registerPlaylistRoutes(
       const userId = parseInt(request.user!.sub, 10);
       const deleted = deletePlaylist(
         db,
-        parseInt(request.params.id, 10),
+        parseIntParam(request.params.id, "id"),
         userId,
       );
       if (!deleted)
@@ -127,7 +128,7 @@ export function registerPlaylistRoutes(
       const userId = parseInt(request.user!.sub, 10);
       const item = addToPlaylist(
         db,
-        parseInt(request.params.id, 10),
+        parseIntParam(request.params.id, "id"),
         userId,
         media_id,
       );
@@ -143,9 +144,9 @@ export function registerPlaylistRoutes(
       const userId = parseInt(request.user!.sub, 10);
       const removed = removeFromPlaylist(
         db,
-        parseInt(request.params.id, 10),
+        parseIntParam(request.params.id, "id"),
         userId,
-        parseInt(request.params.itemId, 10),
+        parseIntParam(request.params.itemId, "itemId"),
       );
       if (!removed) return reply.code(404).send({ error: "Item not found" });
       return reply.code(204).send();
@@ -172,7 +173,7 @@ export function registerPlaylistRoutes(
       const userId = parseInt(request.user!.sub, 10);
       const reordered = reorderPlaylist(
         db,
-        parseInt(request.params.id, 10),
+        parseIntParam(request.params.id, "id"),
         userId,
         item_ids,
       );

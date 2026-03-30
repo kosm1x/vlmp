@@ -41,7 +41,14 @@ export function getUserViewingHistory(
     .prepare(
       "SELECT * FROM viewing_log WHERE user_id = ? ORDER BY watched_at DESC LIMIT ?",
     )
-    .all(userId, limit) as any[];
+    .all(userId, limit) as {
+    id: number;
+    media_id: number;
+    watched_at: number;
+    position_seconds: number;
+    duration_seconds: number | null;
+    completed: number;
+  }[];
 }
 
 export function getCompletedMediaIds(

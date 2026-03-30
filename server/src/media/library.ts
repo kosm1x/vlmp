@@ -55,12 +55,25 @@ export function getLibraryFolders(db: Database.Database): LibraryFolder[] {
     .all() as LibraryFolder[];
 }
 
-export function removeLibraryFolder(db: Database.Database, id: number): void {
+export function removeLibraryFolder(
+  db: Database.Database,
+  id: number,
+): boolean {
   const remove = db.transaction(() => {
     db.prepare("DELETE FROM media_items WHERE library_folder_id = ?").run(id);
-    db.prepare("DELETE FROM library_folders WHERE id = ?").run(id);
+    const result = db
+      .prepare("DELETE FROM library_folders WHERE id = ?")
+      .run(id);
+    // Clean up orphaned tv_shows and seasons (H2)
+    db.prepare(
+      "DELETE FROM seasons WHERE id NOT IN (SELECT DISTINCT season_id FROM episodes)",
+    ).run();
+    db.prepare(
+      "DELETE FROM tv_shows WHERE id NOT IN (SELECT DISTINCT show_id FROM seasons)",
+    ).run();
+    return result.changes > 0;
   });
-  remove();
+  return remove() as boolean;
 }
 
 export async function scanLibraryFolder(
@@ -236,8 +249,9 @@ export function browseLibrary(
     params.push(options.category);
   }
   if (options.search) {
-    conditions.push("mi.title LIKE ?");
-    params.push(`%${options.search}%`);
+    const escaped = options.search.replace(/[%_\\]/g, "\\$&");
+    conditions.push("mi.title LIKE ? ESCAPE '\\'");
+    params.push(`%${escaped}%`);
   }
   const where =
     conditions.length > 0 ? `WHERE ${conditions.join(" AND ")}` : "";

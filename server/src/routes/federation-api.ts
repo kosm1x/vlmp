@@ -23,6 +23,7 @@ import {
   destroySession,
 } from "../streaming/session.js";
 import { waitForPlaylist, waitForSegment } from "../streaming/transcoder.js";
+import { parseIntParam } from "./params.js";
 
 export function registerFederationApiRoutes(
   app: FastifyInstance,
@@ -66,7 +67,7 @@ export function registerFederationApiRoutes(
     "/federation/api/media/:id",
     { preHandler: hmac },
     async (request, reply) => {
-      const item = getMediaItem(db, parseInt(request.params.id, 10));
+      const item = getMediaItem(db, parseIntParam(request.params.id, "id"));
       if (!item) return reply.code(404).send({ error: "Not found" });
       return stripSensitiveFields(
         item as unknown as Record<string, unknown>,
@@ -76,19 +77,31 @@ export function registerFederationApiRoutes(
     },
   );
 
-  // TV shows list
+  // TV shows list (stripped)
   app.get("/federation/api/tv/shows", { preHandler: hmac }, async () => {
-    return getTVShows(db);
+    const shows = getTVShows(db) as Record<string, unknown>[];
+    return shows.map((s) => stripSensitiveFields(s, 0, config.serverName));
   });
 
-  // TV show detail
+  // TV show detail (stripped)
   app.get<{ Params: { id: string } }>(
     "/federation/api/tv/shows/:id",
     { preHandler: hmac },
     async (request, reply) => {
-      const result = getTVShowDetail(db, parseInt(request.params.id, 10));
+      const result = getTVShowDetail(
+        db,
+        parseIntParam(request.params.id, "id"),
+      );
       if (!result) return reply.code(404).send({ error: "Show not found" });
-      return result;
+      const strippedShow = stripSensitiveFields(
+        result.show as Record<string, unknown>,
+        0,
+        config.serverName,
+      );
+      const strippedSeasons = (result.seasons as Record<string, unknown>[]).map(
+        (s) => stripSensitiveFields(s, 0, config.serverName),
+      );
+      return { show: strippedShow, seasons: strippedSeasons };
     },
   );
 
@@ -126,7 +139,7 @@ export function registerFederationApiRoutes(
     "/federation/api/stream/:id/start",
     { preHandler: hmac },
     async (request, reply) => {
-      const mediaId = parseInt(request.params.id, 10);
+      const mediaId = parseIntParam(request.params.id, "id");
       const media = getMediaById(mediaId);
       if (!media) return reply.code(404).send({ error: "Media not found" });
       if (!existsSync(media.file_path))

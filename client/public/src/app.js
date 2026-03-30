@@ -1,9 +1,12 @@
-import { h, render } from "https://unpkg.com/preact@10/dist/preact.module.js";
+import {
+  h,
+  render,
+} from "https://unpkg.com/preact@10.24.3/dist/preact.module.js";
 import {
   useState,
   useEffect,
-} from "https://unpkg.com/preact@10/hooks/dist/hooks.module.js";
-import htm from "https://unpkg.com/htm@3?module";
+} from "https://unpkg.com/preact@10.24.3/hooks/dist/hooks.module.js";
+import htm from "https://unpkg.com/htm@3.1.1?module";
 import { isLoggedIn } from "./api.js";
 import { getRoute, onRouteChange } from "./router.js";
 import { Login } from "./components/Login.js";
@@ -114,10 +117,21 @@ function App() {
 try {
   render(html`<${App} />`, document.getElementById("app"));
 } catch (err) {
-  document.getElementById("app").innerHTML = `
-    <div style="display:flex;align-items:center;justify-content:center;min-height:100vh;flex-direction:column;gap:1rem;color:#e5e5e5">
-      <h2>Something went wrong</h2>
-      <p style="color:#808080">${err.message || "An unexpected error occurred"}</p>
-      <button onclick="location.reload()" style="padding:.6rem 1.25rem;background:#e50914;border:none;border-radius:4px;color:#fff;font-size:.9rem;cursor:pointer">Reload</button>
-    </div>`;
+  const container = document.getElementById("app");
+  const wrapper = document.createElement("div");
+  wrapper.style.cssText =
+    "display:flex;align-items:center;justify-content:center;min-height:100vh;flex-direction:column;gap:1rem;color:#e5e5e5";
+  const heading = document.createElement("h2");
+  heading.textContent = "Something went wrong";
+  const msg = document.createElement("p");
+  msg.style.color = "#808080";
+  msg.textContent = err.message || "An unexpected error occurred";
+  const btn = document.createElement("button");
+  btn.style.cssText =
+    "padding:.6rem 1.25rem;background:#e50914;border:none;border-radius:4px;color:#fff;font-size:.9rem;cursor:pointer";
+  btn.textContent = "Reload";
+  btn.onclick = () => location.reload();
+  wrapper.append(heading, msg, btn);
+  container.innerHTML = "";
+  container.append(wrapper);
 }

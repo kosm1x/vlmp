@@ -20,6 +20,31 @@ export function createGuestPass(
   return { code, expires_at };
 }
 
+/** Read-only check — does NOT consume a view */
+export function checkGuestPass(
+  db: Database.Database,
+  code: string,
+): { valid: boolean; mediaId?: number } {
+  const pass = db
+    .prepare(
+      "SELECT media_id, expires_at, max_views, views FROM guest_passes WHERE code = ?",
+    )
+    .get(code) as
+    | {
+        media_id: number;
+        expires_at: number;
+        max_views: number;
+        views: number;
+      }
+    | undefined;
+  if (!pass) return { valid: false };
+  const now = Math.floor(Date.now() / 1000);
+  if (now > pass.expires_at) return { valid: false };
+  if (pass.views >= pass.max_views) return { valid: false };
+  return { valid: true, mediaId: pass.media_id };
+}
+
+/** Validates AND consumes a view (transactional) */
 export function validateGuestPass(
   db: Database.Database,
   code: string,

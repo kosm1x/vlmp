@@ -18,6 +18,7 @@ import {
   getActiveSessions,
 } from "../streaming/session.js";
 import { waitForPlaylist, waitForSegment } from "../streaming/transcoder.js";
+import { parseIntParam } from "./params.js";
 
 interface MediaRow {
   id: number;
@@ -75,7 +76,7 @@ export function registerPlaybackRoutes(
       preHandler: auth,
     },
     async (request, reply) => {
-      const mediaId = parseInt(request.params.id, 10);
+      const mediaId = parseIntParam(request.params.id, "id");
       const media = getMediaById(db, mediaId);
       if (!media) return reply.code(404).send({ error: "Media not found" });
       if (!existsSync(media.file_path))
@@ -241,7 +242,7 @@ export function registerPlaybackRoutes(
       const session = getSession(request.params.sessionId);
       if (!session) return reply.code(404).send({ error: "Session not found" });
       if (session.userId !== "guest" && session.userId !== request.user!.sub) {
-        return reply.code(403).send({ error: "Not your session" });
+        return reply.code(404).send({ error: "Session not found" });
       }
       destroySession(request.params.sessionId);
       return reply.code(204).send();
