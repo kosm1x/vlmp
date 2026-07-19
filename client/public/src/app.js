@@ -1,11 +1,5 @@
-import {
-  h,
-  render,
-} from "preact";
-import {
-  useState,
-  useEffect,
-} from "preact/hooks";
+import { h, render } from "preact";
+import { useState, useEffect } from "preact/hooks";
 import htm from "htm";
 import { isLoggedIn } from "./api.js";
 import { getRoute, onRouteChange } from "./router.js";
@@ -20,6 +14,7 @@ import { PlaylistDetail } from "./components/PlaylistDetail.js";
 import { Servers } from "./components/Servers.js";
 import { ServerBrowse } from "./components/ServerBrowse.js";
 import { HealthDashboard } from "./components/HealthDashboard.js";
+import { Settings } from "./components/Settings.js";
 const html = htm.bind(h);
 
 function NotFound() {
@@ -85,6 +80,9 @@ function App() {
       break;
     case "health":
       content = html`<${HealthDashboard} />`;
+      break;
+    case "settings":
+      content = html`<${Settings} />`;
       break;
     case "servers":
       if (pathParts[1] && pathParts[2] === "detail")

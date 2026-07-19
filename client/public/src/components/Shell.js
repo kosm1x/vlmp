@@ -33,10 +33,15 @@ export function Shell({ children }) {
         <li><a href="#/education" aria-label="Education">Education</a></li>
         <li><a href="#/playlists" aria-label="Playlists">Playlists</a></li>
         <li><a href="#/servers" aria-label="Servers">Servers</a></li>
-        ${getUserRole() === "admin" &&
-        html`<li>
-          <a href="#/health" aria-label="Library Health">Health</a>
-        </li>`}
+        ${
+          getUserRole() === "admin" &&
+          html`<li>
+              <a href="#/health" aria-label="Library Health">Health</a>
+            </li>
+            <li>
+              <a href="#/settings" aria-label="Server Settings">Settings</a>
+            </li>`
+        }
       </ul>
       <form class="nav-search" onSubmit=${handleSearch}>
         <input

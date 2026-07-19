@@ -1,10 +1,7 @@
 import { h } from "preact";
-import {
-  useState,
-  useEffect,
-} from "preact/hooks";
+import { useState, useEffect } from "preact/hooks";
 import htm from "htm";
-import { get } from "../api.js";
+import { get, getUserRole } from "../api.js";
 import { MediaRow } from "./MediaRow.js";
 const html = htm.bind(h);
 const CATS = [
@@ -77,7 +74,17 @@ export function Browse({ category }) {
     return html`<div class="browse">
       <div class="empty">
         <h2>No media found</h2>
-        <p>Add library folders in settings to get started.</p>
+        ${
+          getUserRole() === "admin"
+            ? html`<p>Add library folders to get started.</p>
+                <a
+                  class="lum-btn"
+                  href="#/settings"
+                  style=${{ marginTop: "1rem" }}
+                  >Open Settings</a
+                >`
+            : html`<p>Ask an administrator to add library folders.</p>`
+        }
       </div>
     </div>`;
   return html`<div class="browse">
