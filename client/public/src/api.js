@@ -29,6 +29,8 @@ export const post = (path, body) =>
   api(path, { method: "POST", body: JSON.stringify(body) });
 export const put = (path, body, options) =>
   api(path, { method: "PUT", body: JSON.stringify(body), ...options });
+export const patch = (path, body) =>
+  api(path, { method: "PATCH", body: JSON.stringify(body) });
 export const del = (path, options) =>
   api(path, { method: "DELETE", ...options });
 export function getUserRole() {

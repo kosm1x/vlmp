@@ -1,7 +1,7 @@
 import { h } from "preact";
 import { useState, useEffect, useRef } from "preact/hooks";
 import htm from "htm";
-import { get, post, del, getUserRole, getUserId } from "../api.js";
+import { get, post, del, patch, getUserRole, getUserId } from "../api.js";
 const html = htm.bind(h);
 
 const CATEGORIES = [
@@ -115,6 +115,34 @@ export function Settings() {
     }
   }
 
+  async function toggleFolder(folder, fields) {
+    // Optimistic: reflect the toggle immediately, revert via reload on failure.
+    setFolders((prev) =>
+      prev.map((f) =>
+        f.id === folder.id
+          ? {
+              ...f,
+              ...(fields.is_visible !== undefined && {
+                is_visible: fields.is_visible ? 1 : 0,
+              }),
+              ...(fields.is_searchable !== undefined && {
+                is_searchable: fields.is_searchable ? 1 : 0,
+              }),
+            }
+          : f,
+      ),
+    );
+    try {
+      const updated = await patch(`/admin/folders/${folder.id}`, fields);
+      if (!mountedRef.current) return;
+      setFolders((prev) => prev.map((f) => (f.id === folder.id ? updated : f)));
+    } catch (err) {
+      if (!mountedRef.current) return;
+      setError(err.message || "Failed to update folder");
+      load();
+    }
+  }
+
   // While any folder is scanning, refresh until every scan settles.
   function pollWhileScanning(data) {
     if (!mountedRef.current) return;
@@ -217,6 +245,7 @@ export function Settings() {
               <th scope="col">Path</th>
               <th scope="col">Category</th>
               <th scope="col">Status</th>
+              <th scope="col">Access</th>
               <th scope="col"><span class="sr-only">Actions</span></th>
             </tr>
           </thead>
@@ -232,6 +261,33 @@ export function Settings() {
                     <span class="scan-status ${f.scan_status || "pending"}"
                       >${f.scan_status || "pending"}</span
                     >
+                  </td>
+                  <td data-label="Access">
+                    <div class="folder-toggles">
+                      <label class="folder-toggle">
+                        <input
+                          type="checkbox"
+                          checked=${!!f.is_visible}
+                          onChange=${(e) =>
+                            toggleFolder(f, { is_visible: e.target.checked })}
+                        />
+                        Visible
+                      </label>
+                      <label
+                        class="folder-toggle ${!f.is_visible ? "muted" : ""}"
+                      >
+                        <input
+                          type="checkbox"
+                          checked=${!!f.is_searchable}
+                          disabled=${!f.is_visible}
+                          onChange=${(e) =>
+                            toggleFolder(f, {
+                              is_searchable: e.target.checked,
+                            })}
+                        />
+                        Searchable
+                      </label>
+                    </div>
                   </td>
                   <td>
                     <div class="folder-actions">
@@ -261,6 +317,16 @@ export function Settings() {
             )}
           </tbody>
         </table>`
+      }
+      ${
+        folders !== null &&
+        folders.length > 0 &&
+        html`<p class="settings-note">
+          Hidden libraries don't appear in browse, search, or recommendations
+          for non-admin users, and their titles can't be opened or played. You
+          always see everything. "Searchable" only affects whether a visible
+          library shows up in search results.
+        </p>`
       }
     </section>
 

@@ -8,6 +8,7 @@ import { loadConfig } from "./config.js";
 import { getDatabase, closeDatabase } from "./db/index.js";
 import { initSchema } from "./db/schema.js";
 import { startCleanupLoop } from "./db/cleanup.js";
+import { startBackupLoop } from "./db/backup.js";
 import { registerAuthRoutes } from "./routes/auth.js";
 import { registerUserRoutes } from "./routes/users.js";
 import { registerLibraryRoutes } from "./routes/library.js";
@@ -125,6 +126,7 @@ registerHealthRoutes(app, db, config);
 
 const heartbeatTimer = startHeartbeatLoop(db, config);
 const cleanupTimer = startCleanupLoop(db);
+const backupTimer = startBackupLoop(db, config);
 
 app.setNotFoundHandler(async (request, reply) => {
   if (
@@ -150,6 +152,7 @@ const shutdown = async () => {
   app.log.info("Shutting down...");
   clearInterval(heartbeatTimer);
   clearInterval(cleanupTimer);
+  if (backupTimer) clearInterval(backupTimer);
   destroyAllSessions();
   closeDatabase();
   await app.close();

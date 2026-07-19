@@ -196,6 +196,27 @@ body {
   gap: 0.5rem;
   justify-content: flex-end;
 }
+.folder-toggles {
+  display: flex;
+  flex-direction: column;
+  gap: 0.35rem;
+}
+.folder-toggle {
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+  font-size: 0.8rem;
+  color: var(--lum-text-secondary);
+  cursor: pointer;
+  white-space: nowrap;
+}
+.folder-toggle input {
+  accent-color: var(--lum-accent-alt);
+  cursor: pointer;
+}
+.folder-toggle.muted {
+  opacity: 0.45;
+}
 .settings-form {
   display: flex;
   gap: 0.75rem;

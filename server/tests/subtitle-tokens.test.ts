@@ -32,7 +32,9 @@ describe("subtitle HMAC tokens", () => {
 
   it("tampered token returns false", () => {
     const { token } = generateSubtitleToken(SECRET, "42", "7");
-    const tampered = "a" + token.slice(1);
+    // Flip the first char to one guaranteed different (the signature is hex, so
+    // a blind "a"+slice was a no-op whenever it already started with 'a').
+    const tampered = (token[0] === "a" ? "b" : "a") + token.slice(1);
     expect(validateSubtitleToken(SECRET, "42", "7", tampered)).toBe(false);
   });
 

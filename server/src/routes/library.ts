@@ -11,7 +11,10 @@ import {
   addLibraryFolder,
   getLibraryFolders,
   removeLibraryFolder,
+  setFolderVisibility,
   scanLibraryFolder,
+  isMediaFolderVisible,
+  isShowVisible,
   type LibraryFolder,
 } from "../media/library.js";
 import type { MediaCategory } from "../scanner/classify.js";
@@ -40,6 +43,7 @@ export function registerLibraryRoutes(
       limit: limit ? parseInt(limit, 10) : undefined,
       offset: offset ? parseInt(offset, 10) : undefined,
       search,
+      includeHidden: request.user!.role === "admin",
     });
   });
 
@@ -50,6 +54,7 @@ export function registerLibraryRoutes(
       return getRecentlyAdded(
         db,
         request.query.limit ? parseInt(request.query.limit, 10) : 20,
+        request.user!.role === "admin",
       );
     },
   );
@@ -58,23 +63,31 @@ export function registerLibraryRoutes(
     "/library/:id",
     { preHandler: auth },
     async (request, reply) => {
-      const item = getMediaItem(db, parseIntParam(request.params.id, "id"));
+      const id = parseIntParam(request.params.id, "id");
+      const item = getMediaItem(db, id);
       if (!item) return reply.code(404).send({ error: "Not found" });
+      // Access boundary: a non-admin cannot open media in a hidden library.
+      if (request.user!.role !== "admin" && !isMediaFolderVisible(db, id))
+        return reply.code(404).send({ error: "Not found" });
       return item;
     },
   );
 
-  app.get("/library/tv/shows", { preHandler: auth }, async () =>
-    getTVShows(db),
+  app.get("/library/tv/shows", { preHandler: auth }, async (request) =>
+    getTVShows(db, request.user!.role === "admin"),
   );
 
   app.get<{ Params: { id: string } }>(
     "/library/tv/shows/:id",
     { preHandler: auth },
     async (request, reply) => {
+      const showId = parseIntParam(request.params.id, "id");
+      if (request.user!.role !== "admin" && !isShowVisible(db, showId))
+        return reply.code(404).send({ error: "Show not found" });
       const result = getTVShowDetail(
         db,
-        parseIntParam(request.params.id, "id"),
+        showId,
+        request.user!.role === "admin",
       );
       if (!result) return reply.code(404).send({ error: "Show not found" });
       return result;
@@ -117,6 +130,32 @@ export function registerLibraryRoutes(
     },
   );
 
+  app.patch<{
+    Params: { id: string };
+    Body: { is_visible?: boolean; is_searchable?: boolean };
+  }>(
+    "/admin/folders/:id",
+    {
+      schema: {
+        body: {
+          type: "object",
+          properties: {
+            is_visible: { type: "boolean" },
+            is_searchable: { type: "boolean" },
+          },
+          additionalProperties: false,
+        },
+      },
+      preHandler: [auth, adminOnly],
+    },
+    async (request, reply) => {
+      const folderId = parseIntParam(request.params.id, "id");
+      const updated = setFolderVisibility(db, folderId, request.body);
+      if (!updated) return reply.code(404).send({ error: "Folder not found" });
+      return reply.send(updated);
+    },
+  );
+
   app.delete<{ Params: { id: string } }>(
     "/admin/folders/:id",
     { preHandler: [auth, adminOnly] },
@@ -137,8 +176,8 @@ export function registerLibraryRoutes(
         .prepare("SELECT * FROM library_folders WHERE id = ?")
         .get(id) as LibraryFolder | undefined;
       if (!folder) return reply.code(404).send({ error: "Folder not found" });
-      const added = await scanLibraryFolder(db, folder, config);
-      return reply.send({ added, folder_id: id });
+      const { added, pruned } = await scanLibraryFolder(db, folder, config);
+      return reply.send({ added, pruned, folder_id: id });
     },
   );
 }

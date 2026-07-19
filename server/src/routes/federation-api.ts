@@ -50,6 +50,9 @@ export function registerFederationApiRoutes(
       limit: limit ? parseInt(limit, 10) : undefined,
       offset: offset ? parseInt(offset, 10) : undefined,
       search,
+      // Federation peers are a separate trust domain from local non-admin
+      // users — the local visibility gate doesn't apply here.
+      includeHidden: true,
     });
     return {
       items: (result.items || []).map((i) =>
@@ -80,7 +83,7 @@ export function registerFederationApiRoutes(
 
   // TV shows list (stripped)
   app.get("/federation/api/tv/shows", { preHandler: hmac }, async () => {
-    const shows = getTVShows(db) as Record<string, unknown>[];
+    const shows = getTVShows(db, true) as Record<string, unknown>[];
     return shows.map((s) => stripSensitiveFields(s, 0, config.serverName));
   });
 
@@ -92,6 +95,7 @@ export function registerFederationApiRoutes(
       const result = getTVShowDetail(
         db,
         parseIntParam(request.params.id, "id"),
+        true, // federation peers bypass the local visibility gate
       );
       if (!result) return reply.code(404).send({ error: "Show not found" });
       const strippedShow = stripSensitiveFields(

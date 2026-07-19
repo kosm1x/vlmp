@@ -13,6 +13,7 @@ import {
   removePreference,
   getUserPreferences,
 } from "../ai/preferences.js";
+import { isMediaFolderVisible } from "../media/library.js";
 import { parseIntParam } from "./params.js";
 
 interface MediaDetails {
@@ -31,14 +32,20 @@ interface MediaDetails {
 function enrichWithMediaDetails(
   db: Database.Database,
   items: ScoredItem[],
+  includeHidden: boolean,
 ): (ScoredItem & Partial<MediaDetails>)[] {
   if (items.length === 0) return [];
   const placeholders = items.map(() => "?").join(",");
   const ids = items.map((i) => i.media_id);
+  // Never surface media from hidden libraries to a non-admin, even if the
+  // recommender's candidate pool included them.
+  const gate = includeHidden
+    ? ""
+    : "AND library_folder_id IN (SELECT id FROM library_folders WHERE is_visible = 1)";
   const mediaRows = db
     .prepare(
       `SELECT id, title, type, poster_path, backdrop_path, year, rating, genres, duration, description
-       FROM media_items WHERE id IN (${placeholders})`,
+       FROM media_items WHERE id IN (${placeholders}) ${gate}`,
     )
     .all(...ids) as MediaDetails[];
 
@@ -67,7 +74,11 @@ export function registerRecommendationRoutes(
       const userId = parseInt(request.user!.sub, 10);
       const limit = Math.min(parseInt(request.query.limit || "20", 10), 100);
       const result = getRecommendations(db, userId, limit);
-      const enriched = enrichWithMediaDetails(db, result.items);
+      const enriched = enrichWithMediaDetails(
+        db,
+        result.items,
+        request.user!.role === "admin",
+      );
       return {
         items: enriched,
         strategies_used: result.strategies_used,
@@ -84,7 +95,11 @@ export function registerRecommendationRoutes(
       const userId = parseInt(request.user!.sub, 10);
       invalidateRecommendationCache(db, userId);
       const result = getRecommendations(db, userId);
-      const enriched = enrichWithMediaDetails(db, result.items);
+      const enriched = enrichWithMediaDetails(
+        db,
+        result.items,
+        request.user!.role === "admin",
+      );
       return {
         items: enriched,
         strategies_used: result.strategies_used,
@@ -99,9 +114,17 @@ export function registerRecommendationRoutes(
     { preHandler: auth },
     async (request) => {
       const mediaId = parseIntParam(request.params.mediaId, "mediaId");
+      // Gate the seed too, so this can't distinguish a hidden media id from a
+      // non-existent one (consistent with the anti-oracle in progress.ts).
+      if (request.user!.role !== "admin" && !isMediaFolderVisible(db, mediaId))
+        return { items: [] };
       const limit = Math.min(parseInt(request.query.limit || "10", 10), 50);
       const items = getSimilarItems(db, mediaId, limit);
-      const enriched = enrichWithMediaDetails(db, items);
+      const enriched = enrichWithMediaDetails(
+        db,
+        items,
+        request.user!.role === "admin",
+      );
       return { items: enriched };
     },
   );

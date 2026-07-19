@@ -57,6 +57,7 @@ export function registerPlaylistRoutes(
         db,
         parseIntParam(request.params.id, "id"),
         userId,
+        request.user!.role === "admin",
       );
       if (!playlist)
         return reply.code(404).send({ error: "Playlist not found" });
@@ -131,6 +132,7 @@ export function registerPlaylistRoutes(
         parseIntParam(request.params.id, "id"),
         userId,
         media_id,
+        request.user!.role === "admin",
       );
       if (!item) return reply.code(404).send({ error: "Playlist not found" });
       return reply.code(201).send(item);

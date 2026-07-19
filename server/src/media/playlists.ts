@@ -48,15 +48,21 @@ export function getPlaylistWithItems(
   db: Database.Database,
   playlistId: number,
   userId: number,
+  includeHidden: boolean = false,
 ): PlaylistWithItems | null {
   const playlist = db
     .prepare("SELECT * FROM playlists WHERE id = ? AND user_id = ?")
     .get(playlistId, userId) as Playlist | undefined;
   if (!playlist) return null;
 
+  // Library gate: a non-admin's playlist view drops items whose library was
+  // hidden after they were added (also drops deleted-media placeholder rows).
+  const gate = includeHidden
+    ? ""
+    : "AND pi.media_id IN (SELECT id FROM media_items WHERE library_folder_id IN (SELECT id FROM library_folders WHERE is_visible = 1))";
   const items = db
     .prepare(
-      "SELECT pi.*, mi.title, mi.poster_path, mi.duration FROM playlist_items pi LEFT JOIN media_items mi ON mi.id = pi.media_id WHERE pi.playlist_id = ? ORDER BY pi.position",
+      `SELECT pi.*, mi.title, mi.poster_path, mi.duration FROM playlist_items pi LEFT JOIN media_items mi ON mi.id = pi.media_id WHERE pi.playlist_id = ? ${gate} ORDER BY pi.position`,
     )
     .all(playlistId) as PlaylistItem[];
 
@@ -91,6 +97,7 @@ export function addToPlaylist(
   playlistId: number,
   userId: number,
   mediaId: number,
+  includeHidden: boolean = false,
 ): PlaylistItem | null {
   // Verify ownership
   const playlist = db
@@ -98,10 +105,15 @@ export function addToPlaylist(
     .get(playlistId, userId);
   if (!playlist) return null;
 
-  // Verify media exists (friendlier than FK violation 500)
-  const media = db
-    .prepare("SELECT id FROM media_items WHERE id = ?")
-    .get(mediaId);
+  // Verify media exists AND (for non-admins) is in a visible library, so a
+  // hidden title can't be smuggled into a playlist by its id.
+  const media = includeHidden
+    ? db.prepare("SELECT id FROM media_items WHERE id = ?").get(mediaId)
+    : db
+        .prepare(
+          "SELECT id FROM media_items WHERE id = ? AND library_folder_id IN (SELECT id FROM library_folders WHERE is_visible = 1)",
+        )
+        .get(mediaId);
   if (!media) return null;
 
   const maxPos = db

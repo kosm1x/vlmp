@@ -1,4 +1,5 @@
 import type Database from "better-sqlite3";
+import { existsSync } from "node:fs";
 import type { Config } from "../config.js";
 import { discoverMedia } from "../scanner/discover.js";
 import { probeFile } from "../scanner/probe.js";
@@ -16,6 +17,16 @@ export interface LibraryFolder {
   category: MediaCategory;
   scan_status: string;
   last_scanned: number | null;
+  is_visible: number;
+  is_searchable: number;
+}
+
+// The library gate: non-admins only see folders the admin marked visible, and
+// only search folders marked searchable. Admins (includeHidden=true) bypass it.
+// Returned as a self-contained subquery so callers can drop it into a WHERE.
+function visibleFolderSubquery(mode: "view" | "search"): string {
+  const extra = mode === "search" ? " AND is_searchable = 1" : "";
+  return `SELECT id FROM library_folders WHERE is_visible = 1${extra}`;
 }
 
 export interface MediaItem {
@@ -55,6 +66,47 @@ export function getLibraryFolders(db: Database.Database): LibraryFolder[] {
     .all() as LibraryFolder[];
 }
 
+export function setFolderVisibility(
+  db: Database.Database,
+  id: number,
+  fields: { is_visible?: boolean; is_searchable?: boolean },
+): LibraryFolder | undefined {
+  const sets: string[] = [];
+  const params: unknown[] = [];
+  if (fields.is_visible !== undefined) {
+    sets.push("is_visible = ?");
+    params.push(fields.is_visible ? 1 : 0);
+  }
+  if (fields.is_searchable !== undefined) {
+    sets.push("is_searchable = ?");
+    params.push(fields.is_searchable ? 1 : 0);
+  }
+  if (sets.length === 0)
+    return db.prepare("SELECT * FROM library_folders WHERE id = ?").get(id) as
+      LibraryFolder | undefined;
+  return db
+    .prepare(
+      `UPDATE library_folders SET ${sets.join(", ")} WHERE id = ? RETURNING *`,
+    )
+    .get(...params, id) as LibraryFolder | undefined;
+}
+
+// True if a media item's folder is visible to non-admins — the access boundary
+// for detail + playback (an orphaned NULL folder is treated as hidden).
+export function isMediaFolderVisible(
+  db: Database.Database,
+  mediaId: number,
+): boolean {
+  const row = db
+    .prepare(
+      `SELECT 1 FROM media_items WHERE id = ? AND library_folder_id IN (${visibleFolderSubquery(
+        "view",
+      )})`,
+    )
+    .get(mediaId);
+  return !!row;
+}
+
 export function removeLibraryFolder(
   db: Database.Database,
   id: number,
@@ -80,12 +132,13 @@ export async function scanLibraryFolder(
   db: Database.Database,
   folder: LibraryFolder,
   config: Config,
-): Promise<number> {
+): Promise<{ added: number; pruned: number }> {
   db.prepare("UPDATE library_folders SET scan_status = ? WHERE id = ?").run(
     "scanning",
     folder.id,
   );
   let added = 0;
+  let pruned = 0;
   try {
     const files = await discoverMedia(folder.path);
     const insertMedia = db.prepare(
@@ -180,6 +233,8 @@ export async function scanLibraryFolder(
         }
       }
     }
+    // Empty trash: drop rows for files removed/renamed since the last scan.
+    if (config.emptyTrashOnScan) pruned = pruneMissingFiles(db, folder.id);
     const now = Math.floor(Date.now() / 1000);
     db.prepare(
       "UPDATE library_folders SET scan_status = ?, last_scanned = ? WHERE id = ?",
@@ -191,7 +246,45 @@ export async function scanLibraryFolder(
     );
     throw err;
   }
-  return added;
+  return { added, pruned };
+}
+
+// Empty trash: remove media_items in this folder whose file no longer exists
+// on disk (rename/delete leaves the old row otherwise — the add-only-scan gap).
+// FK cascades clean up watch_progress / playlist_items / episodes; orphaned
+// shows/seasons are swept after. Returns the number of rows removed.
+export function pruneMissingFiles(
+  db: Database.Database,
+  folderId: number,
+): number {
+  const rows = db
+    .prepare(
+      "SELECT id, file_path FROM media_items WHERE library_folder_id = ?",
+    )
+    .all(folderId) as { id: number; file_path: string }[];
+  const missing = rows.filter((r) => !existsSync(r.file_path));
+  if (missing.length === 0) return 0;
+  // Safety valve: if EVERY file is missing, the source drive is almost
+  // certainly unmounted — deleting the whole library would be catastrophic and
+  // is never what "empty trash" means. Skip and let the admin investigate.
+  if (missing.length === rows.length) {
+    console.warn(
+      `[scan] all ${rows.length} files in folder ${folderId} are missing — skipping prune (drive unmounted?)`,
+    );
+    return 0;
+  }
+  const prune = db.transaction(() => {
+    const del = db.prepare("DELETE FROM media_items WHERE id = ?");
+    for (const r of missing) del.run(r.id);
+    db.prepare(
+      "DELETE FROM seasons WHERE id NOT IN (SELECT DISTINCT season_id FROM episodes)",
+    ).run();
+    db.prepare(
+      "DELETE FROM tv_shows WHERE id NOT IN (SELECT DISTINCT show_id FROM seasons)",
+    ).run();
+  });
+  prune();
+  return missing.length;
 }
 
 function linkEpisodeToShow(
@@ -236,6 +329,7 @@ export function browseLibrary(
     limit?: number;
     offset?: number;
     search?: string;
+    includeHidden?: boolean;
   },
 ): { items: MediaItem[]; total: number } {
   const conditions: string[] = [];
@@ -253,6 +347,14 @@ export function browseLibrary(
     conditions.push("mi.title LIKE ? ESCAPE '\\'");
     params.push(`%${escaped}%`);
   }
+  // Filter in SQL (not post-hoc) so LIMIT/OFFSET pagination stays correct.
+  // A search additionally requires the folder to be searchable.
+  if (!options.includeHidden)
+    conditions.push(
+      `mi.library_folder_id IN (${visibleFolderSubquery(
+        options.search ? "search" : "view",
+      )})`,
+    );
   const where =
     conditions.length > 0 ? `WHERE ${conditions.join(" AND ")}` : "";
   const limit = options.limit || 50;
@@ -275,33 +377,76 @@ export function getMediaItem(
   id: number,
 ): MediaItem | undefined {
   return db.prepare("SELECT * FROM media_items WHERE id = ?").get(id) as
-    | MediaItem
-    | undefined;
+    MediaItem | undefined;
 }
 
 export function getRecentlyAdded(
   db: Database.Database,
   limit: number = 20,
+  includeHidden: boolean = false,
 ): MediaItem[] {
+  const where = includeHidden
+    ? ""
+    : `WHERE library_folder_id IN (${visibleFolderSubquery("view")})`;
   return db
-    .prepare("SELECT * FROM media_items ORDER BY added_at DESC LIMIT ?")
+    .prepare(
+      `SELECT * FROM media_items ${where} ORDER BY added_at DESC LIMIT ?`,
+    )
     .all(limit) as MediaItem[];
 }
 
-export function getTVShows(db: Database.Database) {
+export function getTVShows(
+  db: Database.Database,
+  includeHidden: boolean = false,
+) {
+  // A show is visible when at least one of its episodes' media is in a visible
+  // folder; hidden-only shows drop out via HAVING episode_count > 0.
+  const join = includeHidden
+    ? "LEFT JOIN episodes e ON e.season_id = s.id"
+    : `LEFT JOIN episodes e ON e.season_id = s.id AND e.media_id IN (SELECT id FROM media_items WHERE library_folder_id IN (${visibleFolderSubquery(
+        "view",
+      )}))`;
+  const having = includeHidden ? "" : "HAVING episode_count > 0";
   return db
     .prepare(
-      "SELECT ts.*, COUNT(DISTINCT s.id) as season_count, COUNT(e.id) as episode_count FROM tv_shows ts LEFT JOIN seasons s ON s.show_id = ts.id LEFT JOIN episodes e ON e.season_id = s.id GROUP BY ts.id ORDER BY ts.title",
+      `SELECT ts.*, COUNT(DISTINCT s.id) as season_count, COUNT(e.id) as episode_count FROM tv_shows ts LEFT JOIN seasons s ON s.show_id = ts.id ${join} GROUP BY ts.id ${having} ORDER BY ts.title`,
     )
     .all();
 }
 
-export function getTVShowDetail(db: Database.Database, showId: number) {
+// True if a show has at least one episode in a visible folder — the access
+// boundary for the show-detail route for non-admins.
+export function isShowVisible(db: Database.Database, showId: number): boolean {
+  const row = db
+    .prepare(
+      `SELECT 1 FROM episodes e
+       JOIN seasons s ON s.id = e.season_id
+       WHERE s.show_id = ? AND e.media_id IN (SELECT id FROM media_items WHERE library_folder_id IN (${visibleFolderSubquery(
+         "view",
+       )})) LIMIT 1`,
+    )
+    .get(showId);
+  return !!row;
+}
+
+export function getTVShowDetail(
+  db: Database.Database,
+  showId: number,
+  includeHidden: boolean = false,
+) {
   const show = db.prepare("SELECT * FROM tv_shows WHERE id = ?").get(showId);
   if (!show) return null;
+  // A show can span folders (episodes matched by title across libraries). For a
+  // non-admin, only surface episodes whose media is in a visible folder — a
+  // show that's reachable via one visible episode must not leak hidden ones.
+  const epGate = includeHidden
+    ? ""
+    : `AND e.media_id IN (SELECT id FROM media_items WHERE library_folder_id IN (${visibleFolderSubquery(
+        "view",
+      )}))`;
   const seasons = db
     .prepare(
-      "SELECT s.*, json_group_array(json_object('id', e.id, 'episode_number', e.episode_number, 'media_id', e.media_id, 'title', mi.title, 'duration', mi.duration, 'poster_path', mi.poster_path)) as episodes FROM seasons s LEFT JOIN episodes e ON e.season_id = s.id LEFT JOIN media_items mi ON mi.id = e.media_id WHERE s.show_id = ? GROUP BY s.id ORDER BY s.season_number",
+      `SELECT s.*, json_group_array(json_object('id', e.id, 'episode_number', e.episode_number, 'media_id', e.media_id, 'title', mi.title, 'duration', mi.duration, 'poster_path', mi.poster_path)) as episodes FROM seasons s LEFT JOIN episodes e ON e.season_id = s.id ${epGate} LEFT JOIN media_items mi ON mi.id = e.media_id WHERE s.show_id = ? GROUP BY s.id ORDER BY s.season_number`,
     )
     .all(showId);
   return { show, seasons };

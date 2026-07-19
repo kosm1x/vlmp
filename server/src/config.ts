@@ -17,7 +17,25 @@ export interface Config {
   serverFingerprint: string;
   maxTranscodeSessions: number;
   minFreeDiskBytes: number;
+  transcodePreset: string;
+  emptyTrashOnScan: boolean;
+  backupDir: string;
+  backupIntervalHours: number;
+  backupRetention: number;
 }
+
+// x264 -preset values, slowest→fastest. Plex's "transcoder quality" slider.
+const X264_PRESETS = [
+  "ultrafast",
+  "superfast",
+  "veryfast",
+  "faster",
+  "fast",
+  "medium",
+  "slow",
+  "slower",
+  "veryslow",
+];
 
 export function loadConfig(): Config {
   const dataDir = resolve(process.env.VLMP_DATA_DIR || "./data");
@@ -53,6 +71,30 @@ export function loadConfig(): Config {
       `Invalid VLMP_MIN_FREE_DISK_MB: ${process.env.VLMP_MIN_FREE_DISK_MB}. Must be >= 0.`,
     );
   }
+  const transcodePreset = process.env.VLMP_TRANSCODE_PRESET || "veryfast";
+  if (!X264_PRESETS.includes(transcodePreset)) {
+    throw new Error(
+      `Invalid VLMP_TRANSCODE_PRESET: "${transcodePreset}". Must be one of ${X264_PRESETS.join(", ")}.`,
+    );
+  }
+  const backupIntervalHours = parseInt(
+    process.env.VLMP_BACKUP_INTERVAL_HOURS || "24",
+    10,
+  );
+  if (isNaN(backupIntervalHours) || backupIntervalHours < 0) {
+    throw new Error(
+      `Invalid VLMP_BACKUP_INTERVAL_HOURS: ${process.env.VLMP_BACKUP_INTERVAL_HOURS}. Must be >= 0 (0 disables).`,
+    );
+  }
+  const backupRetention = parseInt(
+    process.env.VLMP_BACKUP_RETENTION || "7",
+    10,
+  );
+  if (isNaN(backupRetention) || backupRetention < 1) {
+    throw new Error(
+      `Invalid VLMP_BACKUP_RETENTION: ${process.env.VLMP_BACKUP_RETENTION}. Must be >= 1.`,
+    );
+  }
   const tmdbApiKey = process.env.VLMP_TMDB_API_KEY || "";
   if (!tmdbApiKey) {
     console.warn(
@@ -76,5 +118,10 @@ export function loadConfig(): Config {
     serverFingerprint: "", // Set at startup after loading/generating key
     maxTranscodeSessions,
     minFreeDiskBytes: minFreeDiskMb * 1024 * 1024,
+    transcodePreset,
+    emptyTrashOnScan: process.env.VLMP_EMPTY_TRASH_ON_SCAN !== "false",
+    backupDir: resolve(dataDir, "backups"),
+    backupIntervalHours,
+    backupRetention,
   };
 }

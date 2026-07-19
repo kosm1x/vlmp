@@ -62,6 +62,10 @@ All configuration is via environment variables:
 | `VLMP_PUBLIC_URL`             | _(empty)_                   | Public URL of this server (for federation linking)                       |
 | `VLMP_MAX_TRANSCODE_SESSIONS` | `4`                         | Max concurrent transcode sessions (direct play uncapped)                 |
 | `VLMP_MIN_FREE_DISK_MB`       | `2048`                      | Free-space floor on the transcode volume; new transcodes refuse below it |
+| `VLMP_TRANSCODE_PRESET`       | `veryfast`                  | x264 preset (ultrafast…veryslow); trade CPU for quality                  |
+| `VLMP_EMPTY_TRASH_ON_SCAN`    | `true`                      | Prune DB rows for deleted/renamed files at end of each scan              |
+| `VLMP_BACKUP_INTERVAL_HOURS`  | `24`                        | Scheduled SQLite backup interval in hours (0 disables)                   |
+| `VLMP_BACKUP_RETENTION`       | `7`                         | Number of DB backups to keep                                             |
 
 ## Scripts
 

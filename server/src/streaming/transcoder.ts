@@ -34,7 +34,7 @@ export function startTranscode(
     "-c:v",
     "libx264",
     "-preset",
-    "veryfast",
+    config.transcodePreset,
     "-tune",
     "film",
     "-profile:v",

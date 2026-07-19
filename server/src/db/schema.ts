@@ -16,6 +16,8 @@ CREATE TABLE IF NOT EXISTS library_folders (
   category TEXT NOT NULL,
   scan_status TEXT NOT NULL DEFAULT 'pending',
   last_scanned INTEGER,
+  is_visible INTEGER NOT NULL DEFAULT 1,
+  is_searchable INTEGER NOT NULL DEFAULT 1,
   created_at INTEGER NOT NULL DEFAULT (unixepoch())
 );
 CREATE TABLE IF NOT EXISTS media_items (
@@ -196,15 +198,43 @@ CREATE INDEX IF NOT EXISTS idx_metadata_cache_media ON metadata_cache(media_id);
 CREATE INDEX IF NOT EXISTS idx_metadata_cache_show ON metadata_cache(show_id);
 `;
 
+// Idempotent column adds for DBs created before a column existed. SQLite
+// allows ADD COLUMN with a constant DEFAULT, so existing rows get the default.
+function addColumnIfMissing(
+  db: Database.Database,
+  table: string,
+  column: string,
+  definition: string,
+): void {
+  const cols = db.prepare(`PRAGMA table_info(${table})`).all() as {
+    name: string;
+  }[];
+  if (!cols.some((c) => c.name === column))
+    db.exec(`ALTER TABLE ${table} ADD COLUMN ${column} ${definition}`);
+}
+
 export function initSchema(db: Database.Database): void {
   db.exec(TABLES);
+  // Migrations: existing libraries default to visible + searchable, preserving
+  // pre-gate behavior. New installs get these from the CREATE above.
+  addColumnIfMissing(
+    db,
+    "library_folders",
+    "is_visible",
+    "INTEGER NOT NULL DEFAULT 1",
+  );
+  addColumnIfMissing(
+    db,
+    "library_folders",
+    "is_searchable",
+    "INTEGER NOT NULL DEFAULT 1",
+  );
   db.exec(INDEXES);
   db.exec(
     `CREATE TABLE IF NOT EXISTS schema_version (version INTEGER NOT NULL);`,
   );
   const row = db.prepare("SELECT version FROM schema_version").get() as
-    | { version: number }
-    | undefined;
+    { version: number } | undefined;
   if (!row) {
     db.prepare("INSERT INTO schema_version (version) VALUES (?)").run(
       SCHEMA_VERSION,

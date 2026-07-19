@@ -6,6 +6,7 @@ import type { Config } from "../config.js";
 import { authMiddleware, adminOnly } from "../auth/middleware.js";
 import { validateGuestPass } from "../auth/guest.js";
 import { canDirectPlay, serveDirectFile } from "../streaming/direct.js";
+import { isMediaFolderVisible } from "../media/library.js";
 import {
   getAvailableProfiles,
   generateMasterPlaylist,
@@ -80,6 +81,9 @@ export function registerPlaybackRoutes(
       const mediaId = parseIntParam(request.params.id, "id");
       const media = getMediaById(db, mediaId);
       if (!media) return reply.code(404).send({ error: "Media not found" });
+      // Access boundary: non-admins cannot stream media in a hidden library.
+      if (request.user!.role !== "admin" && !isMediaFolderVisible(db, mediaId))
+        return reply.code(404).send({ error: "Media not found" });
       if (!existsSync(media.file_path))
         return reply.code(404).send({ error: "Media file not found on disk" });
       const ext = extname(media.file_path).toLowerCase();
