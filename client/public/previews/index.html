@@ -1,0 +1,67 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>VLMP — UI Design Concepts</title>
+  <style>
+    :root { color-scheme: dark; }
+    body {
+      margin: 0;
+      font-family: system-ui, sans-serif;
+      background: #0c0b0a;
+      color: #e8e4de;
+      min-height: 100vh;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      padding: 3rem 1.5rem;
+      box-sizing: border-box;
+    }
+    h1 { font-weight: 600; letter-spacing: 0.02em; margin: 0 0 0.4rem; }
+    p.sub { color: #9a938a; margin: 0 0 2.5rem; }
+    ul { list-style: none; padding: 0; margin: 0; width: 100%; max-width: 560px; }
+    li { margin-bottom: 0.9rem; }
+    a {
+      display: flex;
+      justify-content: space-between;
+      align-items: baseline;
+      gap: 1rem;
+      padding: 1rem 1.3rem;
+      border: 1px solid #2a2723;
+      border-radius: 10px;
+      color: inherit;
+      text-decoration: none;
+      transition: border-color 0.15s, background 0.15s;
+    }
+    a:hover { border-color: #b98a4b; background: #171512; }
+    .name { font-size: 1.05rem; font-weight: 600; }
+    .desc { color: #9a938a; font-size: 0.85rem; text-align: right; }
+    .approved .name::after {
+      content: "approved";
+      font-size: 0.65rem;
+      font-weight: 700;
+      text-transform: uppercase;
+      letter-spacing: 0.08em;
+      color: #0c0b0a;
+      background: #b98a4b;
+      border-radius: 4px;
+      padding: 0.15rem 0.45rem;
+      margin-left: 0.6rem;
+      vertical-align: 2px;
+    }
+  </style>
+</head>
+<body>
+  <h1>VLMP — UI Design Concepts</h1>
+  <p class="sub">Six explorations, 2026-03-30 · two approved directions</p>
+  <ul>
+    <li class="approved"><a href="lumiere.html"><span class="name">Lumiere Dark</span><span class="desc">warm dark editorial · Libre Bodoni · 3-card masonry</span></a></li>
+    <li class="approved"><a href="oxide.html"><span class="name">Oxide</span><span class="desc">Hi-Fi faceplate · amber accent · VU meters</span></a></li>
+    <li><a href="acetate.html"><span class="name">Acetate</span><span class="desc">translucent layers</span></a></li>
+    <li><a href="broadcast.html"><span class="name">Broadcast</span><span class="desc">TV-station chrome</span></a></li>
+    <li><a href="projectionist.html"><span class="name">Projectionist</span><span class="desc">cinema-booth motif</span></a></li>
+    <li><a href="signal.html"><span class="name">Signal</span><span class="desc">oscilloscope minimal</span></a></li>
+  </ul>
+</body>
+</html>
