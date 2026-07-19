@@ -57,7 +57,7 @@ export function registerRecommendationRoutes(
   db: Database.Database,
   config: Config,
 ): void {
-  const auth = authMiddleware(config);
+  const auth = authMiddleware(config, db);
 
   // GET /recommendations
   app.get<{ Querystring: { limit?: string } }>(

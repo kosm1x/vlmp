@@ -19,7 +19,7 @@ export function registerPlaylistRoutes(
   db: Database.Database,
   config: Config,
 ): void {
-  const auth = authMiddleware(config);
+  const auth = authMiddleware(config, db);
 
   app.get("/playlists", { preHandler: auth }, async (request) => {
     const userId = parseInt(request.user!.sub, 10);

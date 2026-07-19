@@ -9,6 +9,7 @@ import { getDatabase, closeDatabase } from "./db/index.js";
 import { initSchema } from "./db/schema.js";
 import { startCleanupLoop } from "./db/cleanup.js";
 import { registerAuthRoutes } from "./routes/auth.js";
+import { registerUserRoutes } from "./routes/users.js";
 import { registerLibraryRoutes } from "./routes/library.js";
 import { registerProgressRoutes } from "./routes/progress.js";
 import { registerPlaybackRoutes } from "./routes/playback.js";
@@ -110,6 +111,7 @@ app.addHook("onSend", async (_request, reply, payload) => {
 });
 
 registerAuthRoutes(app, db, config);
+registerUserRoutes(app, db, config);
 registerLibraryRoutes(app, db, config);
 registerProgressRoutes(app, db, config);
 registerPlaybackRoutes(app, db, config);

@@ -29,28 +29,53 @@ export function registerAuthRoutes(
     },
     async (request, reply) => {
       const { username, password } = request.body;
-      const existing = db
-        .prepare("SELECT id FROM users WHERE username = ?")
-        .get(username);
-      if (existing)
-        return reply.code(409).send({ error: "Username already taken" });
+      // Open registration exists only to bootstrap the first (admin) account.
+      // After that the admin controls who gets access, via /admin/users.
+      // Hash BEFORE touching the DB: the count-then-insert must be one
+      // synchronous transaction with no await between them, or two concurrent
+      // first-registrations could both pass the count and mint two admins.
       const passwordHash = await hashPassword(password);
+      let userId: number | bigint;
+      try {
+        userId = db.transaction(() => {
+          const { count } = db
+            .prepare("SELECT COUNT(*) as count FROM users")
+            .get() as { count: number };
+          if (count > 0) throw new Error("registration_closed");
+          return db
+            .prepare(
+              "INSERT INTO users (username, password_hash, role) VALUES (?, ?, ?)",
+            )
+            .run(username, passwordHash, "admin").lastInsertRowid;
+        })();
+      } catch (err) {
+        if (err instanceof Error && err.message === "registration_closed")
+          return reply.code(403).send({
+            error:
+              "Registration is closed — ask the administrator for an account",
+          });
+        throw err;
+      }
+      const token = await issueToken(
+        { sub: String(userId), username, role: "admin" },
+        config,
+      );
+      return reply.code(201).send({
+        token,
+        user: { id: userId, username, role: "admin" },
+      });
+    },
+  );
+
+  // Public: lets the login screen know whether to offer first-run registration.
+  app.get(
+    "/auth/status",
+    { config: { rateLimit: { max: 20, timeWindow: "1 minute" } } },
+    async () => {
       const userCount = db
         .prepare("SELECT COUNT(*) as count FROM users")
         .get() as { count: number };
-      const role = userCount.count === 0 ? "admin" : "user";
-      const result = db
-        .prepare(
-          "INSERT INTO users (username, password_hash, role) VALUES (?, ?, ?)",
-        )
-        .run(username, passwordHash, role);
-      const token = await issueToken(
-        { sub: String(result.lastInsertRowid), username, role },
-        config,
-      );
-      return reply
-        .code(201)
-        .send({ token, user: { id: result.lastInsertRowid, username, role } });
+      return { registration_open: userCount.count === 0 };
     },
   );
 
@@ -109,7 +134,7 @@ export function registerAuthRoutes(
           additionalProperties: false,
         },
       },
-      preHandler: authMiddleware(config),
+      preHandler: authMiddleware(config, db),
     },
     async (request, reply) => {
       const { media_id, expires_hours = 48, max_views = 3 } = request.body;

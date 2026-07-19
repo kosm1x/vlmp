@@ -17,7 +17,7 @@ export function registerMetadataRoutes(
   db: Database.Database,
   config: Config,
 ): void {
-  const auth = authMiddleware(config);
+  const auth = authMiddleware(config, db);
 
   app.get<{ Querystring: { q: string; type?: string; year?: string } }>(
     "/metadata/search",

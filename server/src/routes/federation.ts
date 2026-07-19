@@ -27,7 +27,7 @@ export function registerFederationRoutes(
   db: Database.Database,
   config: Config,
 ): void {
-  const auth = authMiddleware(config);
+  const auth = authMiddleware(config, db);
 
   // List federated servers (admin only)
   app.get(

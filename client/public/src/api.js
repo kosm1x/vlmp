@@ -39,3 +39,11 @@ export function getUserRole() {
     return null;
   }
 }
+export function getUserId() {
+  if (!token) return null;
+  try {
+    return parseInt(JSON.parse(atob(token.split(".")[1])).sub, 10);
+  } catch {
+    return null;
+  }
+}

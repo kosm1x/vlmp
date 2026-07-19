@@ -14,7 +14,7 @@ export function registerHealthRoutes(
   db: Database.Database,
   config: Config,
 ): void {
-  const auth = authMiddleware(config);
+  const auth = authMiddleware(config, db);
 
   // GET /admin/health — Full health report
   app.get("/admin/health", { preHandler: [auth, adminOnly] }, async () => {

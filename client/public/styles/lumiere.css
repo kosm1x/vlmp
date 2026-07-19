@@ -99,6 +99,11 @@ body {
   outline: 2px solid var(--lum-accent-alt);
   outline-offset: 2px;
 }
+.auth-note {
+  color: var(--lum-text-secondary);
+  font-size: 0.85rem;
+  margin: 0 0 0.75rem;
+}
 .sr-only {
   position: absolute;
   width: 1px;
@@ -139,11 +144,11 @@ body {
   color: var(--lum-text-secondary);
   margin-bottom: 1rem;
 }
-.folder-table {
+.settings-table {
   width: 100%;
   border-collapse: collapse;
 }
-.folder-table th {
+.settings-table th {
   text-align: left;
   font-size: 0.7rem;
   font-weight: 600;
@@ -154,7 +159,7 @@ body {
   padding: 0.5rem 0.75rem;
   border-bottom: 1px solid var(--lum-border);
 }
-.folder-table td {
+.settings-table td {
   padding: 0.85rem 0.75rem;
   border-bottom: 1px solid var(--lum-border);
   font-size: 0.875rem;
@@ -257,16 +262,16 @@ body {
   .settings-page {
     padding: 5rem 1rem 3rem;
   }
-  .folder-table thead {
+  .settings-table thead {
     display: none;
   }
-  .folder-table td {
+  .settings-table td {
     display: block;
     border-bottom: none;
     padding: 0.25rem 0.5rem;
   }
   /* Column headers are hidden at this width — restore field context per cell */
-  .folder-table td[data-label]::before {
+  .settings-table td[data-label]::before {
     content: attr(data-label);
     display: block;
     font-size: 0.65rem;
@@ -276,7 +281,7 @@ body {
     color: var(--lum-text-secondary);
     margin-bottom: 0.15rem;
   }
-  .folder-table tr {
+  .settings-table tr {
     display: block;
     border-bottom: 1px solid var(--lum-border);
     padding: 0.75rem 0;
