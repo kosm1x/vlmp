@@ -65,6 +65,12 @@ Full codebase audit with 27 remediations across 4 severity levels. Key fixes: JW
 
 Five-dimension adversarial audit (performance, code, logic, resilience, usability), fixes shipped in five tiers: vendored client libs via import map (no CDN dependency), process-survival hardening (global handlers, transcoder lifecycle, awaited direct serve, guarded timers), transcode resource bounds (lazy profile start, session cap, free-space floor, boot sweep, client keepalive teardown), session-list authz, HLS resume timeline fix, federation stream/HMAC/heartbeat seam repairs with integration tests. 181 tests passing. Findings + deferred queue: `docs/AUDIT-2026-07-19.md`.
 
+---
+
+### Access Control + Library Gate + Plex Hygiene -- COMPLETE (2026-07-19)
+
+Closed-membership auth: registration bootstraps the first admin then closes; admin provisions accounts via `/admin/users`; per-request account/role re-check gives immediate revocation. Admin library gate: per-folder `is_visible`/`is_searchable` limiting non-admins across browse/search/detail/stream/recommendations (real 404 boundary), toggled in Settings. Adopted Plex options after an explicit config review (`docs/PLEX-CONFIG-REVIEW.md`): empty-trash on scan, scheduled SQLite backup, configurable x264 preset. First Lumiere Dark UI surface (Settings page). Audited R1+R2+R3 on the access-control surface. 205 tests passing.
+
 ### UI Design Direction -- IN PROGRESS
 
 Evaluated 6 concepts (Projectionist, Signal, Lumiere, Broadcast, Acetate, Oxide). Two approved:
