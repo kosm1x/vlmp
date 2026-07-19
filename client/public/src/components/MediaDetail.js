@@ -1,9 +1,9 @@
-import { h } from "https://unpkg.com/preact@10/dist/preact.module.js";
+import { h } from "preact";
 import {
   useState,
   useEffect,
-} from "https://unpkg.com/preact@10/hooks/dist/hooks.module.js";
-import htm from "https://unpkg.com/htm@3?module";
+} from "preact/hooks";
+import htm from "htm";
 import { get, post, del } from "../api.js";
 import { navigate } from "../router.js";
 import { MediaRow } from "./MediaRow.js";

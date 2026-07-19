@@ -1,5 +1,5 @@
-import { h } from 'https://unpkg.com/preact@10/dist/preact.module.js';
-import htm from 'https://unpkg.com/htm@3?module';
+import { h } from 'preact';
+import htm from 'htm';
 import { MediaCard } from './MediaCard.js';
 const html = htm.bind(h);
 export function MediaRow({ label, items }) {

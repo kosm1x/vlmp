@@ -11,3 +11,16 @@ export function parseIntParam(val: string, name: string): number {
   }
   return n;
 }
+
+/**
+ * Parse a JSON TEXT column, returning the fallback on malformed content —
+ * one bad scanner-written row must not make a title permanently unplayable.
+ */
+export function parseJsonColumn<T>(text: string | null, fallback: T): T {
+  if (!text) return fallback;
+  try {
+    return JSON.parse(text) as T;
+  } catch {
+    return fallback;
+  }
+}

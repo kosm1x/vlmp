@@ -3,7 +3,7 @@ import type Database from "better-sqlite3";
 import { createReadStream, existsSync } from "node:fs";
 import { join, extname, resolve } from "node:path";
 import type { Config } from "../config.js";
-import { authMiddleware } from "../auth/middleware.js";
+import { authMiddleware, adminOnly } from "../auth/middleware.js";
 import { validateGuestPass } from "../auth/guest.js";
 import { canDirectPlay, serveDirectFile } from "../streaming/direct.js";
 import {
@@ -16,9 +16,10 @@ import {
   startProfileTranscode,
   destroySession,
   getActiveSessions,
+  hasEnoughDiskSpace,
 } from "../streaming/session.js";
 import { waitForPlaylist, waitForSegment } from "../streaming/transcoder.js";
-import { parseIntParam } from "./params.js";
+import { parseIntParam, parseJsonColumn } from "./params.js";
 
 interface MediaRow {
   id: number;
@@ -86,35 +87,44 @@ export function registerPlaybackRoutes(
       const profiles = direct
         ? []
         : getAvailableProfiles(media.resolution_width, media.resolution_height);
+      if (!direct && !(await hasEnoughDiskSpace(config)))
+        return reply
+          .code(507)
+          .send({ error: "Insufficient disk space for transcoding" });
       const session = createSession(
+        config,
         mediaId,
         media.file_path,
         request.user!.sub,
         profiles,
         direct,
+        {
+          startTime: request.body.start_time,
+          audioTrack: request.body.audio_track,
+        },
       );
+      if (!session)
+        return reply
+          .code(503)
+          .send({ error: "Too many active streams — try again later" });
       if (direct)
         return reply.send({
           session_id: session.id,
           mode: "direct",
           url: `/stream/${session.id}/direct`,
           duration: media.duration,
-          audio_tracks: media.audio_tracks
-            ? JSON.parse(media.audio_tracks)
-            : [],
+          audio_tracks: parseJsonColumn(media.audio_tracks, []),
         });
-      for (const profile of profiles)
-        startProfileTranscode(session, profile.name, config, {
-          startTime: request.body.start_time,
-          audioTrack: request.body.audio_track,
-        });
+      // Transcodes start lazily when a profile playlist is first requested —
+      // the client only ever plays one variant, so eager-starting all of them
+      // multiplies CPU and disk cost by the profile count for nothing.
       return reply.send({
         session_id: session.id,
         mode: "transcode",
         url: `/stream/${session.id}/master.m3u8`,
         profiles: profiles.map((p) => p.name),
         duration: media.duration,
-        audio_tracks: media.audio_tracks ? JSON.parse(media.audio_tracks) : [],
+        audio_tracks: parseJsonColumn(media.audio_tracks, []),
       });
     },
   );
@@ -132,21 +142,28 @@ export function registerPlaybackRoutes(
       const profiles = direct
         ? []
         : getAvailableProfiles(media.resolution_width, media.resolution_height);
+      if (!direct && !(await hasEnoughDiskSpace(config)))
+        return reply
+          .code(507)
+          .send({ error: "Insufficient disk space for transcoding" });
       const session = createSession(
+        config,
         result.mediaId,
         media.file_path,
         "guest",
         profiles,
         direct,
       );
+      if (!session)
+        return reply
+          .code(503)
+          .send({ error: "Too many active streams — try again later" });
       if (direct)
         return reply.send({
           session_id: session.id,
           mode: "direct",
           url: `/stream/${session.id}/direct`,
         });
-      for (const profile of profiles)
-        startProfileTranscode(session, profile.name, config);
       return reply.send({
         session_id: session.id,
         mode: "transcode",
@@ -165,7 +182,7 @@ export function registerPlaybackRoutes(
       if (!session) return reply.code(404).send({ error: "Session not found" });
       return reply
         .header("Content-Type", "application/vnd.apple.mpegurl")
-        .send(generateMasterPlaylist(session.profiles, session.id));
+        .send(generateMasterPlaylist(session.profiles));
     },
   );
 
@@ -176,10 +193,22 @@ export function registerPlaybackRoutes(
         return reply.code(400).send({ error: "Invalid session ID format" });
       const session = getSession(request.params.sessionId);
       if (!session) return reply.code(404).send({ error: "Session not found" });
-      const job = session.jobs.get(request.params.profile);
-      if (!job) return reply.code(404).send({ error: "Profile not found" });
+      let job = session.jobs.get(request.params.profile);
+      if (!job) {
+        if (!(await hasEnoughDiskSpace(config)))
+          return reply
+            .code(507)
+            .send({ error: "Insufficient disk space for transcoding" });
+        // Re-check after the await: a concurrent request may have started the
+        // job at that yield point, and starting again would SIGTERM it.
+        job =
+          session.jobs.get(request.params.profile) ??
+          startProfileTranscode(session, request.params.profile, config) ??
+          undefined;
+        if (!job) return reply.code(404).send({ error: "Profile not found" });
+      }
       try {
-        await waitForPlaylist(job.outputDir);
+        await waitForPlaylist(job);
       } catch {
         return reply.code(503).send({ error: "Playlist not ready yet" });
       }
@@ -208,7 +237,7 @@ export function registerPlaybackRoutes(
       }
       if (!existsSync(segmentPath)) {
         try {
-          await waitForSegment(job.outputDir, request.params.segment);
+          await waitForSegment(job, request.params.segment);
         } catch {
           return reply.code(404).send({ error: "Segment not available" });
         }
@@ -229,7 +258,9 @@ export function registerPlaybackRoutes(
         return reply
           .code(404)
           .send({ error: "Session not found or not direct play" });
-      serveDirectFile(session.filePath, request, reply);
+      // Must be awaited: a floating rejection here (file deleted mid-session)
+      // would escape Fastify's error handling and crash the process.
+      return serveDirectFile(session.filePath, request, reply);
     },
   );
 
@@ -249,7 +280,9 @@ export function registerPlaybackRoutes(
     },
   );
 
-  app.get("/stream/sessions", { preHandler: auth }, async () => {
+  // Session IDs are capability tokens for the unauthenticated stream routes —
+  // this list must never be visible to non-admin users.
+  app.get("/stream/sessions", { preHandler: [auth, adminOnly] }, async () => {
     return getActiveSessions().map((s) => ({
       id: s.id,
       mediaId: s.mediaId,

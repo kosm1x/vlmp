@@ -1,6 +1,6 @@
-import { h } from 'https://unpkg.com/preact@10/dist/preact.module.js';
-import { useState, useEffect } from 'https://unpkg.com/preact@10/hooks/dist/hooks.module.js';
-import htm from 'https://unpkg.com/htm@3?module';
+import { h } from 'preact';
+import { useState, useEffect } from 'preact/hooks';
+import htm from 'htm';
 import { get } from '../api.js';
 import { MediaCard } from './MediaCard.js';
 const html = htm.bind(h);

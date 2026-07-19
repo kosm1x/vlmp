@@ -11,7 +11,16 @@
 </head>
 <body>
   <div id="app"></div>
-  <script defer src="https://cdn.jsdelivr.net/npm/hls.js@1.5.15/dist/hls.min.js"></script>
+  <script type="importmap">
+    {
+      "imports": {
+        "preact": "/vendor/preact.module.js",
+        "preact/hooks": "/vendor/preact-hooks.module.js",
+        "htm": "/vendor/htm.module.js"
+      }
+    }
+  </script>
+  <script defer src="/vendor/hls.min.js"></script>
   <script type="module" src="/src/app.js"></script>
 </body>
 </html>

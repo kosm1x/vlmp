@@ -54,13 +54,13 @@ describe("adaptive profiles", () => {
 });
 
 describe("master playlist", () => {
-  it("generates valid m3u8", () => {
-    const pl = generateMasterPlaylist(
-      getAvailableProfiles(1920, 1080),
-      "test-session",
-    );
+  it("generates valid m3u8 with relative variant URIs", () => {
+    const pl = generateMasterPlaylist(getAvailableProfiles(1920, 1080));
     expect(pl).toContain("#EXTM3U");
     expect(pl).toContain("RESOLUTION=1920x1080");
-    expect(pl).toContain("/stream/test-session/1080p/playlist.m3u8");
+    // Relative URIs resolve against whichever URL served the master —
+    // required for the federation proxy path to work at all.
+    expect(pl).toContain("1080p/playlist.m3u8");
+    expect(pl).not.toContain("/stream/");
   });
 });

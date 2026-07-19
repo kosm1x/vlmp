@@ -21,9 +21,10 @@ import {
   getSession,
   startProfileTranscode,
   destroySession,
+  hasEnoughDiskSpace,
 } from "../streaming/session.js";
 import { waitForPlaylist, waitForSegment } from "../streaming/transcoder.js";
-import { parseIntParam } from "./params.js";
+import { parseIntParam, parseJsonColumn } from "./params.js";
 
 export function registerFederationApiRoutes(
   app: FastifyInstance,
@@ -105,8 +106,16 @@ export function registerFederationApiRoutes(
     },
   );
 
-  // Heartbeat endpoint
-  app.post("/federation/heartbeat", { preHandler: hmac }, async () => {
+  // Heartbeat endpoint. An HMAC-verified heartbeat from a peer we marked
+  // offline proves it is reachable again — reactivate it (recovers the
+  // mutual-offline deadlock after a network partition).
+  app.post("/federation/heartbeat", { preHandler: hmac }, async (request) => {
+    const peer = request.federatedServer!;
+    if (peer.status === "offline") {
+      db.prepare(
+        "UPDATE federated_servers SET status = 'active', last_seen = unixepoch() WHERE id = ?",
+      ).run(peer.id);
+    }
     return { ok: true, name: config.serverName };
   });
 
@@ -149,37 +158,43 @@ export function registerFederationApiRoutes(
       const profiles = direct
         ? []
         : getAvailableProfiles(media.resolution_width, media.resolution_height);
+      if (!direct && !(await hasEnoughDiskSpace(config)))
+        return reply
+          .code(507)
+          .send({ error: "Insufficient disk space for transcoding" });
       const session = createSession(
+        config,
         mediaId,
         media.file_path,
         "federation",
         profiles,
         direct,
+        {
+          startTime: request.body?.start_time,
+          audioTrack: request.body?.audio_track,
+        },
       );
+      if (!session)
+        return reply
+          .code(503)
+          .send({ error: "Too many active streams — try again later" });
       if (direct) {
         return reply.send({
           session_id: session.id,
           mode: "direct",
           url: `/federation/api/stream/${session.id}/direct`,
           duration: media.duration,
-          audio_tracks: media.audio_tracks
-            ? JSON.parse(media.audio_tracks)
-            : [],
+          audio_tracks: parseJsonColumn(media.audio_tracks, []),
         });
       }
-      for (const profile of profiles) {
-        startProfileTranscode(session, profile.name, config, {
-          startTime: request.body?.start_time,
-          audioTrack: request.body?.audio_track,
-        });
-      }
+      // Transcodes start lazily on first profile-playlist request (see playback.ts).
       return reply.send({
         session_id: session.id,
         mode: "hls",
         url: `/federation/api/stream/${session.id}/master.m3u8`,
         profiles: profiles.map((p) => p.name),
         duration: media.duration,
-        audio_tracks: media.audio_tracks ? JSON.parse(media.audio_tracks) : [],
+        audio_tracks: parseJsonColumn(media.audio_tracks, []),
       });
     },
   );
@@ -193,7 +208,7 @@ export function registerFederationApiRoutes(
       if (!session) return reply.code(404).send({ error: "Session not found" });
       return reply
         .header("Content-Type", "application/vnd.apple.mpegurl")
-        .send(generateMasterPlaylist(session.profiles, session.id));
+        .send(generateMasterPlaylist(session.profiles));
     },
   );
 
@@ -204,10 +219,22 @@ export function registerFederationApiRoutes(
     async (request, reply) => {
       const session = getSession(request.params.sessionId);
       if (!session) return reply.code(404).send({ error: "Session not found" });
-      const job = session.jobs.get(request.params.profile);
-      if (!job) return reply.code(404).send({ error: "Profile not found" });
+      let job = session.jobs.get(request.params.profile);
+      if (!job) {
+        if (!(await hasEnoughDiskSpace(config)))
+          return reply
+            .code(507)
+            .send({ error: "Insufficient disk space for transcoding" });
+        // Re-check after the await: a concurrent request may have started the
+        // job at that yield point, and starting again would SIGTERM it.
+        job =
+          session.jobs.get(request.params.profile) ??
+          startProfileTranscode(session, request.params.profile, config) ??
+          undefined;
+        if (!job) return reply.code(404).send({ error: "Profile not found" });
+      }
       try {
-        await waitForPlaylist(job.outputDir);
+        await waitForPlaylist(job);
       } catch {
         return reply.code(503).send({ error: "Playlist not ready yet" });
       }
@@ -238,7 +265,7 @@ export function registerFederationApiRoutes(
       }
       if (!existsSync(segmentPath)) {
         try {
-          await waitForSegment(job.outputDir, request.params.segment);
+          await waitForSegment(job, request.params.segment);
         } catch {
           return reply.code(404).send({ error: "Segment not available" });
         }
@@ -259,7 +286,8 @@ export function registerFederationApiRoutes(
         return reply
           .code(404)
           .send({ error: "Session not found or not direct play" });
-      serveDirectFile(session.filePath, request, reply);
+      // Must be awaited: a floating rejection here would crash the process.
+      return serveDirectFile(session.filePath, request, reply);
     },
   );
 

@@ -9,6 +9,8 @@ export interface TranscodeJob {
   outputDir: string;
   profile: TranscodeProfile;
   startedAt: number;
+  exited: boolean;
+  exitCode: number | null;
 }
 
 export function startTranscode(
@@ -77,12 +79,37 @@ export function startTranscode(
   const proc = spawn(config.ffmpegPath, args, {
     stdio: ["ignore", "pipe", "pipe"],
   });
+  const job: TranscodeJob = {
+    process: proc,
+    outputDir,
+    profile,
+    startedAt: Date.now(),
+    exited: false,
+    exitCode: null,
+  };
   proc.stderr?.on("data", (data: Buffer) => {
     const msg = data.toString().trim();
     if (msg && (msg.includes("Error") || msg.includes("error")))
       console.error(`[transcode ${sessionId}/${profile.name}] ${msg}`);
   });
-  return { process: proc, outputDir, profile, startedAt: Date.now() };
+  // Without an error listener, a missing/renamed ffmpeg binary would emit an
+  // unhandled 'error' event and take down the whole process.
+  proc.on("error", (err) => {
+    job.exited = true;
+    job.exitCode = -1;
+    console.error(
+      `[transcode ${sessionId}/${profile.name}] spawn failed: ${err.message}`,
+    );
+  });
+  proc.on("exit", (code) => {
+    job.exited = true;
+    job.exitCode = code;
+    if (code !== 0 && code !== null)
+      console.error(
+        `[transcode ${sessionId}/${profile.name}] ffmpeg exited with code ${code}`,
+      );
+  });
+  return job;
 }
 
 export function isPlaylistReady(outputDir: string): boolean {
@@ -96,13 +123,15 @@ export function isSegmentReady(
 }
 
 export function waitForPlaylist(
-  outputDir: string,
+  job: TranscodeJob,
   timeoutMs: number = 15000,
 ): Promise<void> {
   return new Promise((resolve, reject) => {
     const start = Date.now();
     const check = () => {
-      if (isPlaylistReady(outputDir)) resolve();
+      if (isPlaylistReady(job.outputDir)) resolve();
+      else if (job.exited)
+        reject(new Error(`Transcode exited (code ${job.exitCode})`));
       else if (Date.now() - start > timeoutMs)
         reject(new Error("Timeout waiting for HLS playlist"));
       else setTimeout(check, 200);
@@ -112,14 +141,16 @@ export function waitForPlaylist(
 }
 
 export function waitForSegment(
-  outputDir: string,
+  job: TranscodeJob,
   segmentName: string,
   timeoutMs: number = 30000,
 ): Promise<void> {
   return new Promise((resolve, reject) => {
     const start = Date.now();
     const check = () => {
-      if (isSegmentReady(outputDir, segmentName)) resolve();
+      if (isSegmentReady(job.outputDir, segmentName)) resolve();
+      else if (job.exited)
+        reject(new Error(`Transcode exited (code ${job.exitCode})`));
       else if (Date.now() - start > timeoutMs)
         reject(new Error(`Timeout waiting for segment ${segmentName}`));
       else setTimeout(check, 300);

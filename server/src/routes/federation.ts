@@ -1,5 +1,6 @@
 import type { FastifyInstance } from "fastify";
 import type Database from "better-sqlite3";
+import { Readable } from "node:stream";
 import type { Config } from "../config.js";
 import { authMiddleware } from "../auth/middleware.js";
 import { adminOnly } from "../auth/middleware.js";
@@ -291,15 +292,38 @@ export function registerFederationRoutes(
         return reply.code(404).send({ error: "Stream session not found" });
       try {
         const subpath = request.params["*"];
-        const { body, contentType } = await proxyStreamContent(
+        // Cancel the upstream fetch when the viewer disconnects — otherwise a
+        // timeout-less direct-play proxy would hold the remote socket open for
+        // the rest of the file.
+        const upstreamAbort = new AbortController();
+        request.raw.on("close", () => {
+          if (!reply.raw.writableEnded) upstreamAbort.abort();
+        });
+        const res = await proxyStreamContent(
           session.server,
           config,
           session.remoteSessionId,
           subpath,
+          request.headers.range,
+          upstreamAbort.signal,
         );
-        return reply
-          .header("content-type", contentType)
-          .send(Buffer.from(body));
+        reply.code(res.status);
+        for (const name of [
+          "content-type",
+          "content-length",
+          "content-range",
+          "accept-ranges",
+        ]) {
+          const value = res.headers.get(name);
+          if (value) reply.header(name, value);
+        }
+        return reply.send(
+          res.body
+            ? Readable.fromWeb(
+                res.body as import("node:stream/web").ReadableStream,
+              )
+            : undefined,
+        );
       } catch {
         return reply.code(502).send({ error: "Stream unavailable" });
       }

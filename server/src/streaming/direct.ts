@@ -40,7 +40,16 @@ export async function serveDirectFile(
   request: FastifyRequest,
   reply: FastifyReply,
 ): Promise<void> {
-  const fileStat = await stat(filePath);
+  let fileStat;
+  try {
+    fileStat = await stat(filePath);
+  } catch (err) {
+    if ((err as NodeJS.ErrnoException).code === "ENOENT") {
+      reply.code(404).send({ error: "Media file not found on disk" });
+      return;
+    }
+    throw err;
+  }
   const fileSize = fileStat.size;
   const ext = filePath.substring(filePath.lastIndexOf(".")).toLowerCase();
   const contentType = MIME_TYPES[ext] || "application/octet-stream";

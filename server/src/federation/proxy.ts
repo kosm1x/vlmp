@@ -129,70 +129,42 @@ export async function proxyStreamStart(
     userId,
   });
 
-  // Rewrite the URL to point through our proxy
+  // Rewrite the URL to point through our proxy. The suffix must match a route
+  // the remote actually serves: master.m3u8 for HLS, direct for direct play
+  // (the remote's own /federation/api/... URL is useless to a browser — it
+  // has no HMAC headers).
   const remoteUrl = data.url as string;
-  if (remoteUrl && data.mode === "hls") {
-    data.url = `/federation/servers/${server.id}/stream/${localSessionId}/playlist.m3u8`;
+  if (remoteUrl) {
+    const suffix = data.mode === "direct" ? "direct" : "master.m3u8";
+    data.url = `/federation/servers/${server.id}/stream/${localSessionId}/${suffix}`;
   }
   data.session_id = localSessionId;
   return data;
 }
 
+// Playlists need no URL rewriting: the master playlist uses relative variant
+// URIs and ffmpeg writes segment names as bare filenames, so every reference
+// resolves naturally against the local proxy URL that served the playlist.
 export async function proxyStreamContent(
   server: FederatedServer,
   config: Config,
   remoteSessionId: string,
   subpath: string,
-): Promise<{ body: ArrayBuffer; contentType: string }> {
+  rangeHeader?: string,
+  signal?: AbortSignal,
+): Promise<Response> {
   const path = `/federation/api/stream/${remoteSessionId}/${subpath}`;
-  const res = await federatedFetch(server, config, "GET", path);
+  const isDirect = subpath === "direct";
+  const res = await federatedFetch(server, config, "GET", path, undefined, {
+    headers: rangeHeader ? { range: rangeHeader } : undefined,
+    // A direct-play fetch streams a whole file — the default 10s abort would
+    // chop it mid-movie. The caller-supplied signal (wired to client
+    // disconnect) is what cancels it instead.
+    timeoutMs: isDirect ? 0 : 10000,
+    signal,
+  });
   if (!res.ok) throw new Error(`Remote server returned ${res.status}`);
-
-  const contentType =
-    res.headers.get("content-type") || "application/octet-stream";
-  let body = await res.arrayBuffer();
-
-  // If this is an M3U8 playlist, rewrite the URLs
-  if (
-    contentType.includes("mpegurl") ||
-    contentType.includes("m3u8") ||
-    subpath.endsWith(".m3u8")
-  ) {
-    const text = new TextDecoder().decode(body);
-    const rewritten = rewritePlaylist(text, server.id, remoteSessionId);
-    body = new TextEncoder().encode(rewritten).buffer as ArrayBuffer;
-  }
-
-  return { body, contentType };
-}
-
-export function rewritePlaylist(
-  content: string,
-  serverId: number,
-  sessionId: string,
-): string {
-  const proxyBase = `/federation/servers/${serverId}/stream/${sessionId}`;
-  return content
-    .split("\n")
-    .map((line) => {
-      const trimmed = line.trim();
-      // Skip comments and empty lines
-      if (!trimmed || trimmed.startsWith("#")) return line;
-      // This is a segment or playlist reference — rewrite to proxy
-      // Handle both relative and absolute URLs
-      if (trimmed.startsWith("http://") || trimmed.startsWith("https://")) {
-        // Extract path portion after the host
-        try {
-          const url = new URL(trimmed);
-          return `${proxyBase}${url.pathname}`;
-        } catch {
-          return `${proxyBase}/${trimmed}`;
-        }
-      }
-      // Relative path — just prepend proxy base
-      return `${proxyBase}/${trimmed}`;
-    })
-    .join("\n");
+  return res;
 }
 
 export async function proxyStreamStop(

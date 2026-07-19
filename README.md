@@ -21,7 +21,7 @@ Personal media server with a robust Node.js backend and an ultra-light Netflix-l
 - **Algorithmic recommendations** — 5-strategy engine (next episode, collaborative filtering, genre matching, similar items, popularity) with no external AI APIs
 - **User preferences** — Like/dislike with recommendation cache invalidation
 - **Library health dashboard** — 8 checks (missing files, zero-byte, metadata gaps, no subtitles, codec/resolution analysis, orphaned entries, duplicates) with admin cleanup
-- **Ultra-light client** — Preact + HTM loaded from CDN (~3KB framework), no build step
+- **Ultra-light client** — Preact + HTM vendored locally (~3KB framework, works fully offline), no build step
 - **Dark retro-modern UI** — Responsive grid layout with category browsing, search, ARIA labels. Two approved design directions: Lumiere Dark (editorial serif) and Oxide (Hi-Fi faceplate)
 
 ## Requirements
@@ -48,18 +48,20 @@ npm run dev
 
 All configuration is via environment variables:
 
-| Variable              | Default                     | Description                                        |
-| --------------------- | --------------------------- | -------------------------------------------------- |
-| `VLMP_PORT`           | `8080`                      | HTTP server port                                   |
-| `VLMP_HOST`           | `0.0.0.0`                   | Bind address                                       |
-| `VLMP_DATA_DIR`       | `./data`                    | Data directory (database, transcode cache)         |
-| `VLMP_JWT_SECRET`     | `vlmp-dev-secret-change-me` | JWT signing secret (**change in production**)      |
-| `VLMP_JWT_EXPIRES_IN` | `24h`                       | JWT token lifetime                                 |
-| `VLMP_FFMPEG_PATH`    | `ffmpeg`                    | Path to FFmpeg binary                              |
-| `VLMP_FFPROBE_PATH`   | `ffprobe`                   | Path to FFprobe binary                             |
-| `VLMP_TMDB_API_KEY`   | _(empty)_                   | TMDb API key for metadata enrichment               |
-| `VLMP_SERVER_NAME`    | `VLMP`                      | Display name for this server in federation         |
-| `VLMP_PUBLIC_URL`     | _(empty)_                   | Public URL of this server (for federation linking) |
+| Variable                      | Default                     | Description                                                              |
+| ----------------------------- | --------------------------- | ------------------------------------------------------------------------ |
+| `VLMP_PORT`                   | `8080`                      | HTTP server port                                                         |
+| `VLMP_HOST`                   | `0.0.0.0`                   | Bind address                                                             |
+| `VLMP_DATA_DIR`               | `./data`                    | Data directory (database, transcode cache)                               |
+| `VLMP_JWT_SECRET`             | `vlmp-dev-secret-change-me` | JWT signing secret (**change in production**)                            |
+| `VLMP_JWT_EXPIRES_IN`         | `24h`                       | JWT token lifetime                                                       |
+| `VLMP_FFMPEG_PATH`            | `ffmpeg`                    | Path to FFmpeg binary                                                    |
+| `VLMP_FFPROBE_PATH`           | `ffprobe`                   | Path to FFprobe binary                                                   |
+| `VLMP_TMDB_API_KEY`           | _(empty)_                   | TMDb API key for metadata enrichment                                     |
+| `VLMP_SERVER_NAME`            | `VLMP`                      | Display name for this server in federation                               |
+| `VLMP_PUBLIC_URL`             | _(empty)_                   | Public URL of this server (for federation linking)                       |
+| `VLMP_MAX_TRANSCODE_SESSIONS` | `4`                         | Max concurrent transcode sessions (direct play uncapped)                 |
+| `VLMP_MIN_FREE_DISK_MB`       | `2048`                      | Free-space floor on the transcode volume; new transcodes refuse below it |
 
 ## Scripts
 
@@ -134,7 +136,8 @@ vlmp/
 │       ├── federation.ts     # Federation admin + proxy routes (JWT auth)
 │       └── federation-api.ts # Peer-facing federation API (HMAC auth)
 ├── client/public/
-│   ├── index.html            # Entry point (CDN imports: Preact, HTM, HLS.js)
+│   ├── index.html            # Entry point (import map → /vendor, HLS.js)
+│   ├── vendor/               # Vendored preact, htm, hls.js (no CDN dependency)
 │   ├── styles/main.css       # Dark theme, responsive layout
 │   └── src/
 │       ├── app.js            # Preact root, route handling
@@ -155,7 +158,7 @@ vlmp/
 │           ├── ServerBrowse.js # Remote library browser
 │           └── HealthDashboard.js # Admin library health dashboard
 ├── client/public/previews/   # UI design concept previews (Lumiere, Oxide, etc.)
-└── server/tests/             # 173 tests across 23 files (vitest)
+└── server/tests/             # 181 tests across 24 files (vitest)
 ```
 
 ## API Overview

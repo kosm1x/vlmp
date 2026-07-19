@@ -3,7 +3,7 @@ import cors from "@fastify/cors";
 import rateLimit from "@fastify/rate-limit";
 import fastifyStatic from "@fastify/static";
 import { resolve } from "node:path";
-import { mkdirSync } from "node:fs";
+import { mkdirSync, rmSync } from "node:fs";
 import { loadConfig } from "./config.js";
 import { getDatabase, closeDatabase } from "./db/index.js";
 import { initSchema } from "./db/schema.js";
@@ -23,8 +23,21 @@ import { loadOrGenerateFingerprint } from "./federation/crypto.js";
 import { destroyAllSessions } from "./streaming/session.js";
 import { startHeartbeatLoop } from "./federation/health.js";
 
+// Last-resort guards. This server typically runs without a supervisor, so
+// availability wins over crash-on-unknown-state: known throw sources are
+// handled at their origin; anything reaching here is logged, not fatal.
+process.on("uncaughtException", (err) => {
+  console.error("[fatal] uncaughtException:", err);
+});
+process.on("unhandledRejection", (reason) => {
+  console.error("[fatal] unhandledRejection:", reason);
+});
+
 const config = loadConfig();
 mkdirSync(config.dataDir, { recursive: true });
+// Sweep transcode segments orphaned by an unclean shutdown (the in-memory
+// session map is the only other cleanup path, and it dies with the process).
+rmSync(config.transcodeTmpDir, { recursive: true, force: true });
 mkdirSync(config.transcodeTmpDir, { recursive: true });
 mkdirSync(config.subtitleDir, { recursive: true });
 
@@ -80,7 +93,7 @@ app.addHook("onSend", async (_request, reply, payload) => {
   if (ct && ct.includes("video/mp2t")) return payload;
   reply.header(
     "Content-Security-Policy",
-    "default-src 'self'; script-src 'self' https://esm.sh https://cdn.jsdelivr.net https://unpkg.com 'unsafe-inline'; style-src 'self' 'unsafe-inline'; img-src 'self' https://image.tmdb.org data:; media-src 'self' blob:; connect-src 'self'; frame-ancestors 'none'",
+    "default-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline'; img-src 'self' https://image.tmdb.org data:; media-src 'self' blob:; connect-src 'self'; frame-ancestors 'none'",
   );
   reply.header(
     "Strict-Transport-Security",

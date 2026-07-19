@@ -19,48 +19,54 @@ export function startHeartbeatLoop(
 ): NodeJS.Timeout {
   return setInterval(
     async () => {
-      const servers = db
-        .prepare(
-          "SELECT * FROM federated_servers WHERE status IN ('active', 'offline')",
-        )
-        .all() as ServerRow[];
+      // The DB reads run outside the per-server try/catch; without this guard a
+      // throw would surface as an unhandled rejection and kill the process.
+      try {
+        const servers = db
+          .prepare(
+            "SELECT * FROM federated_servers WHERE status IN ('active', 'offline')",
+          )
+          .all() as ServerRow[];
 
-      // Clean up failureCounts for removed servers
-      const activeIds = new Set(servers.map((s) => s.id));
-      for (const id of failureCounts.keys()) {
-        if (!activeIds.has(id)) failureCounts.delete(id);
-      }
+        // Clean up failureCounts for removed servers
+        const activeIds = new Set(servers.map((s) => s.id));
+        for (const id of failureCounts.keys()) {
+          if (!activeIds.has(id)) failureCounts.delete(id);
+        }
 
-      await Promise.allSettled(
-        servers.map(async (server) => {
-          try {
-            const res = await federatedFetch(
-              server,
-              config,
-              "POST",
-              "/federation/heartbeat",
-              { name: config.serverName },
-            );
+        await Promise.allSettled(
+          servers.map(async (server) => {
+            try {
+              const res = await federatedFetch(
+                server,
+                config,
+                "POST",
+                "/federation/heartbeat",
+                { name: config.serverName },
+              );
 
-            if (res.ok) {
-              failureCounts.set(server.id, 0);
-              if (server.status === "offline") {
-                db.prepare(
-                  "UPDATE federated_servers SET status = 'active', last_seen = unixepoch() WHERE id = ?",
-                ).run(server.id);
+              if (res.ok) {
+                failureCounts.set(server.id, 0);
+                if (server.status === "offline") {
+                  db.prepare(
+                    "UPDATE federated_servers SET status = 'active', last_seen = unixepoch() WHERE id = ?",
+                  ).run(server.id);
+                } else {
+                  db.prepare(
+                    "UPDATE federated_servers SET last_seen = unixepoch() WHERE id = ?",
+                  ).run(server.id);
+                }
               } else {
-                db.prepare(
-                  "UPDATE federated_servers SET last_seen = unixepoch() WHERE id = ?",
-                ).run(server.id);
+                incrementFailure(db, server);
               }
-            } else {
+            } catch {
               incrementFailure(db, server);
             }
-          } catch {
-            incrementFailure(db, server);
-          }
-        }),
-      );
+          }),
+        );
+      } catch (err) {
+        console.error("[federation] heartbeat loop failed:", err);
+      }
     },
     5 * 60 * 1000,
   ); // 5 minutes

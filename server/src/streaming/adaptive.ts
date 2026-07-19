@@ -56,10 +56,7 @@ export function getAvailableProfiles(
   return PROFILES.filter((p) => p.height <= sourceHeight);
 }
 
-export function generateMasterPlaylist(
-  profiles: TranscodeProfile[],
-  sessionId: string,
-): string {
+export function generateMasterPlaylist(profiles: TranscodeProfile[]): string {
   let m3u8 = "#EXTM3U\n";
   for (const profile of profiles) {
     const bandwidth =
@@ -67,7 +64,9 @@ export function generateMasterPlaylist(
         parseInt(profile.audioBitrate, 10)) *
       1000;
     m3u8 += `#EXT-X-STREAM-INF:BANDWIDTH=${bandwidth},RESOLUTION=${profile.width}x${profile.height},NAME="${profile.name}"\n`;
-    m3u8 += `/stream/${sessionId}/${profile.name}/playlist.m3u8\n`;
+    // Relative URI: resolves against whatever URL served this master —
+    // /stream/:sid/ locally, /federation/servers/:id/stream/:sid/ when proxied.
+    m3u8 += `${profile.name}/playlist.m3u8\n`;
   }
   return m3u8;
 }

@@ -1,10 +1,6 @@
-import { h } from "https://unpkg.com/preact@10/dist/preact.module.js";
-import {
-  useState,
-  useEffect,
-  useRef,
-} from "https://unpkg.com/preact@10/hooks/dist/hooks.module.js";
-import htm from "https://unpkg.com/htm@3?module";
+import { h } from "preact";
+import { useState, useEffect, useRef } from "preact/hooks";
+import htm from "htm";
 import { post, put, get, del } from "../api.js";
 const html = htm.bind(h);
 
@@ -23,7 +19,11 @@ export function Player({ mediaId, onClose, serverId, federated }) {
   const hlsRef = useRef(null);
   const progressTimer = useRef(null);
   const lastUiUpdate = useRef(0);
-  const [session, setSession] = useState(null);
+  // When the server transcodes from a resume point (-ss), the HLS timeline
+  // starts at 0 but represents media time startOffset. All saved/displayed
+  // positions must add this offset; seeking must subtract it.
+  const startOffsetRef = useRef(0);
+  const sessionRef = useRef(null);
   const [media, setMedia] = useState(null);
   const [playing, setPlaying] = useState(false);
   const [currentTime, setCurrentTime] = useState(0);
@@ -39,6 +39,9 @@ export function Player({ mediaId, onClose, serverId, federated }) {
 
   useEffect(() => {
     let cancelled = false;
+    // Reset on every (re)mount and media change — a stale offset from a
+    // previous transcode-resume would corrupt a direct-play title's progress.
+    startOffsetRef.current = 0;
     async function init() {
       try {
         let mediaData, progress;
@@ -62,7 +65,7 @@ export function Player({ mediaId, onClose, serverId, federated }) {
           start_time: progress.position_seconds || 0,
         });
         if (cancelled) return;
-        setSession(sd);
+        sessionRef.current = sd;
         setAudioTracks(sd.audio_tracks || []);
         // Fetch subtitles with HMAC tokens (local only)
         if (!federated) {
@@ -86,8 +89,11 @@ export function Player({ mediaId, onClose, serverId, federated }) {
           if (progress.position_seconds > 0)
             video.currentTime = progress.position_seconds;
         } else if (window.Hls && Hls.isSupported()) {
+          // The server already transcodes from the resume point (start_time),
+          // so the stream's own 0 IS the resume position — seeking here too
+          // would apply the offset twice.
+          startOffsetRef.current = progress.position_seconds || 0;
           const hls = new Hls({
-            startPosition: progress.position_seconds || 0,
             maxBufferLength: 30,
             maxMaxBufferLength: 60,
           });
@@ -102,9 +108,9 @@ export function Player({ mediaId, onClose, serverId, federated }) {
           });
           hlsRef.current = hls;
         } else if (video.canPlayType("application/vnd.apple.mpegurl")) {
+          // Native HLS (Safari): same double-seek hazard as above.
+          startOffsetRef.current = progress.position_seconds || 0;
           video.src = sd.url;
-          if (progress.position_seconds > 0)
-            video.currentTime = progress.position_seconds;
         }
         setLoading(false);
       } catch (err) {
@@ -119,20 +125,55 @@ export function Player({ mediaId, onClose, serverId, federated }) {
         hlsRef.current.destroy();
         hlsRef.current = null;
       }
+      // Tear down the server session on ANY unmount path (hash navigation,
+      // component swap) — otherwise its ffmpeg jobs run for 10 idle minutes.
+      endSession();
     };
   }, [mediaId]);
 
+  function saveProgress(fetchOptions) {
+    if (federated) return;
+    // No session yet = still initializing; the <video> element may hold the
+    // PREVIOUS title's currentTime, and the offset isn't assigned yet.
+    if (!sessionRef.current) return;
+    const v = videoRef.current;
+    if (!v || !(v.currentTime > 0)) return;
+    const off = startOffsetRef.current;
+    put(
+      `/progress/${mediaId}`,
+      {
+        position_seconds: off + v.currentTime,
+        duration_seconds: off + (v.duration || 0),
+      },
+      fetchOptions,
+    ).catch(() => {});
+  }
+
+  function endSession(fetchOptions) {
+    const sd = sessionRef.current;
+    if (!sd) return;
+    sessionRef.current = null;
+    const stopUrl = federated
+      ? `/federation/servers/${serverId}/stream/${sd.session_id}`
+      : `/stream/${sd.session_id}`;
+    del(stopUrl, fetchOptions).catch(() => {});
+  }
+
   useEffect(() => {
     if (federated) return;
-    progressTimer.current = setInterval(() => {
-      const v = videoRef.current;
-      if (v && v.currentTime > 0)
-        put(`/progress/${mediaId}`, {
-          position_seconds: v.currentTime,
-          duration_seconds: v.duration || 0,
-        }).catch(() => {});
-    }, 10000);
+    progressTimer.current = setInterval(() => saveProgress(), 10000);
     return () => clearInterval(progressTimer.current);
+  }, [mediaId, federated]);
+
+  // Refresh/tab-close never runs unmount cleanup — flush progress and free the
+  // server's ffmpeg jobs with keepalive fetches that outlive the page.
+  useEffect(() => {
+    const onPageHide = () => {
+      saveProgress({ keepalive: true });
+      endSession({ keepalive: true });
+    };
+    window.addEventListener("pagehide", onPageHide);
+    return () => window.removeEventListener("pagehide", onPageHide);
   }, [mediaId, federated]);
 
   function onTimeUpdate() {
@@ -151,7 +192,13 @@ export function Player({ mediaId, onClose, serverId, federated }) {
   }
   function seek(e) {
     const v = videoRef.current;
-    if (v) v.currentTime = parseFloat(e.target.value);
+    // The bar operates in absolute media time; the stream timeline starts at
+    // the resume offset, so clamp — rewinding past it needs a fresh session.
+    if (v)
+      v.currentTime = Math.max(
+        0,
+        parseFloat(e.target.value) - startOffsetRef.current,
+      );
   }
   function changeVol(e) {
     const val = parseFloat(e.target.value);
@@ -180,18 +227,8 @@ export function Player({ mediaId, onClose, serverId, federated }) {
     }
   }
   function handleClose() {
-    const v = videoRef.current;
-    if (v && v.currentTime > 0)
-      put(`/progress/${mediaId}`, {
-        position_seconds: v.currentTime,
-        duration_seconds: v.duration || 0,
-      }).catch(() => {});
-    if (session) {
-      const stopUrl = federated
-        ? `/federation/servers/${serverId}/stream/${session.session_id}`
-        : `/stream/${session.session_id}`;
-      del(stopUrl).catch(() => {});
-    }
+    saveProgress();
+    endSession();
     onClose();
   }
 
@@ -225,9 +262,11 @@ export function Player({ mediaId, onClose, serverId, federated }) {
       onPause=${() => setPlaying(false)}
       onEnded=${() => {
         setPlaying(false);
+        if (federated) return;
+        const total = startOffsetRef.current + duration;
         put("/progress/" + mediaId, {
-          position_seconds: duration,
-          duration_seconds: duration,
+          position_seconds: total,
+          duration_seconds: total,
         }).catch(() => {});
       }}
       onClick=${togglePlay}
@@ -245,18 +284,20 @@ export function Player({ mediaId, onClose, serverId, federated }) {
           />`,
       )}
     </video>
-    ${loading &&
-    html`<div class="loading" style=${{ position: "absolute", inset: 0 }}>
-      Loading...
-    </div>`}
+    ${
+      loading &&
+      html`<div class="loading" style=${{ position: "absolute", inset: 0 }}>
+        Loading...
+      </div>`
+    }
     <div class="player-controls">
       <input
         class="player-seek"
         type="range"
         min="0"
-        max=${duration || 0}
+        max=${startOffsetRef.current + (duration || 0)}
         step="0.1"
-        value=${currentTime}
+        value=${startOffsetRef.current + currentTime}
         onInput=${seek}
         aria-label="Seek"
       />
@@ -293,7 +334,10 @@ export function Player({ mediaId, onClose, serverId, federated }) {
           aria-label="Volume"
           style=${{ width: "80px", accentColor: "#e50914" }}
         />
-        <span class="player-time">${fmt(currentTime)} / ${fmt(duration)}</span>
+        <span class="player-time"
+          >${fmt(startOffsetRef.current + currentTime)} /
+          ${fmt(startOffsetRef.current + duration)}</span
+        >
         <div class="player-spacer"></div>
         <select class="player-select" value=${speed} onChange=${changeSpeed}>
           <option value="0.5">0.5x</option>
@@ -303,39 +347,43 @@ export function Player({ mediaId, onClose, serverId, federated }) {
           <option value="1.5">1.5x</option>
           <option value="2">2x</option>
         </select>
-        ${audioTracks.length > 1 &&
-        html`<select class="player-select">
-          ${audioTracks.map(
-            (t, i) =>
-              html`<option value=${i}>
-                ${t.language || "Track " + (i + 1)} (${t.codec})
-              </option>`,
-          )}
-        </select>`}
-        ${subtitles.length > 0 &&
-        html`<select
-          class="player-select"
-          value=${activeSubtitle || ""}
-          onChange=${(e) => {
-            const val = e.target.value;
-            setActiveSubtitle(val || null);
-            const video = videoRef.current;
-            if (video) {
-              for (let i = 0; i < video.textTracks.length; i++) {
-                video.textTracks[i].mode =
-                  video.textTracks[i].language === val ? "showing" : "hidden";
+        ${
+          audioTracks.length > 1 &&
+          html`<select class="player-select">
+            ${audioTracks.map(
+              (t, i) =>
+                html`<option value=${i}>
+                  ${t.language || "Track " + (i + 1)} (${t.codec})
+                </option>`,
+            )}
+          </select>`
+        }
+        ${
+          subtitles.length > 0 &&
+          html`<select
+            class="player-select"
+            value=${activeSubtitle || ""}
+            onChange=${(e) => {
+              const val = e.target.value;
+              setActiveSubtitle(val || null);
+              const video = videoRef.current;
+              if (video) {
+                for (let i = 0; i < video.textTracks.length; i++) {
+                  video.textTracks[i].mode =
+                    video.textTracks[i].language === val ? "showing" : "hidden";
+                }
               }
-            }
-          }}
-        >
-          <option value="">Subs Off</option>
-          ${subtitles.map(
-            (s) =>
-              html`<option value=${s.language || "und"}>
-                ${s.label || s.language || "Unknown"}
-              </option>`,
-          )}
-        </select>`}
+            }}
+          >
+            <option value="">Subs Off</option>
+            ${subtitles.map(
+              (s) =>
+                html`<option value=${s.language || "und"}>
+                  ${s.label || s.language || "Unknown"}
+                </option>`,
+            )}
+          </select>`
+        }
         <button
           class="player-btn"
           onClick=${toggleFs}

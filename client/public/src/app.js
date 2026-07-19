@@ -1,12 +1,12 @@
 import {
   h,
   render,
-} from "https://unpkg.com/preact@10.24.3/dist/preact.module.js";
+} from "preact";
 import {
   useState,
   useEffect,
-} from "https://unpkg.com/preact@10.24.3/hooks/dist/hooks.module.js";
-import htm from "https://unpkg.com/htm@3.1.1?module";
+} from "preact/hooks";
+import htm from "htm";
 import { isLoggedIn } from "./api.js";
 import { getRoute, onRouteChange } from "./router.js";
 import { Login } from "./components/Login.js";

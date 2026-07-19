@@ -24,5 +24,13 @@ export function startCleanupLoop(
   db: Database.Database,
 ): ReturnType<typeof setInterval> {
   runCleanup(db);
-  return setInterval(() => runCleanup(db), CLEANUP_INTERVAL_MS);
+  // A throw here (e.g. SQLITE_FULL on a full disk) would otherwise escape the
+  // timer as an uncaught exception and kill the server.
+  return setInterval(() => {
+    try {
+      runCleanup(db);
+    } catch (err) {
+      console.error("[cleanup] periodic cleanup failed:", err);
+    }
+  }, CLEANUP_INTERVAL_MS);
 }

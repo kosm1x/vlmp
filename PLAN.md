@@ -59,6 +59,12 @@ Algorithmic recommendations (5-strategy engine: next episode, collaborative filt
 
 Full codebase audit with 27 remediations across 4 severity levels. Key fixes: JWT guard bypass, federation session CSPRNG, server.key permissions, parseIntParam validation across all routes, orphan cleanup, FFprobe buffer cap, guest pass check/consume separation, federation TV path stripping, session user ownership, LIKE injection escape, federation body schemas, metadata scan mutex, CDN pinning, HSTS header. 173 tests passing.
 
+---
+
+### Adversarial Audit + Hardening -- COMPLETE (2026-07-19)
+
+Five-dimension adversarial audit (performance, code, logic, resilience, usability), fixes shipped in five tiers: vendored client libs via import map (no CDN dependency), process-survival hardening (global handlers, transcoder lifecycle, awaited direct serve, guarded timers), transcode resource bounds (lazy profile start, session cap, free-space floor, boot sweep, client keepalive teardown), session-list authz, HLS resume timeline fix, federation stream/HMAC/heartbeat seam repairs with integration tests. 181 tests passing. Findings + deferred queue: `docs/AUDIT-2026-07-19.md`.
+
 ### UI Design Direction -- IN PROGRESS
 
 Evaluated 6 concepts (Projectionist, Signal, Lumiere, Broadcast, Acetate, Oxide). Two approved:

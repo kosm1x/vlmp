@@ -15,6 +15,8 @@ export interface Config {
   serverName: string;
   publicUrl: string;
   serverFingerprint: string;
+  maxTranscodeSessions: number;
+  minFreeDiskBytes: number;
 }
 
 export function loadConfig(): Config {
@@ -32,6 +34,24 @@ export function loadConfig(): Config {
         `Invalid VLMP_PUBLIC_URL: "${publicUrl}". Must be a valid URL.`,
       );
     }
+  }
+  const maxTranscodeSessions = parseInt(
+    process.env.VLMP_MAX_TRANSCODE_SESSIONS || "4",
+    10,
+  );
+  if (isNaN(maxTranscodeSessions) || maxTranscodeSessions < 1) {
+    throw new Error(
+      `Invalid VLMP_MAX_TRANSCODE_SESSIONS: ${process.env.VLMP_MAX_TRANSCODE_SESSIONS}. Must be >= 1.`,
+    );
+  }
+  const minFreeDiskMb = parseInt(
+    process.env.VLMP_MIN_FREE_DISK_MB || "2048",
+    10,
+  );
+  if (isNaN(minFreeDiskMb) || minFreeDiskMb < 0) {
+    throw new Error(
+      `Invalid VLMP_MIN_FREE_DISK_MB: ${process.env.VLMP_MIN_FREE_DISK_MB}. Must be >= 0.`,
+    );
   }
   const tmdbApiKey = process.env.VLMP_TMDB_API_KEY || "";
   if (!tmdbApiKey) {
@@ -54,5 +74,7 @@ export function loadConfig(): Config {
     serverName: process.env.VLMP_SERVER_NAME || "VLMP",
     publicUrl,
     serverFingerprint: "", // Set at startup after loading/generating key
+    maxTranscodeSessions,
+    minFreeDiskBytes: minFreeDiskMb * 1024 * 1024,
   };
 }

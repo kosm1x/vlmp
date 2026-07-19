@@ -44,20 +44,27 @@ export function federationAuth(db: Database.Database) {
       return;
     }
 
-    if (server.status !== "active") {
+    // Allow-list gate: only 'active' peers may call the API. The heartbeat
+    // route additionally admits 'offline' peers so two servers that demoted
+    // each other during a partition can recover — otherwise both reject each
+    // other's heartbeats forever and federation deadlocks until re-linked.
+    const isHeartbeat = request.url.split("?")[0] === "/federation/heartbeat";
+    if (
+      server.status !== "active" &&
+      !(isHeartbeat && server.status === "offline")
+    ) {
       reply.code(403).send({ error: "Server not active" });
       return;
     }
 
-    const rawBody =
-      request.method === "GET" || request.method === "DELETE"
-        ? ""
-        : JSON.stringify(request.body || "");
+    // Must mirror federatedFetch exactly: sign the full URL including the
+    // query string, and "" (not '""') when there is no body.
+    const rawBody = request.body ? JSON.stringify(request.body) : "";
 
     const valid = verifyRequest(
       server.shared_secret,
       request.method,
-      request.url.split("?")[0],
+      request.url,
       timestamp,
       rawBody,
       signature,
