@@ -3,7 +3,7 @@ import cors from "@fastify/cors";
 import rateLimit from "@fastify/rate-limit";
 import fastifyStatic from "@fastify/static";
 import { resolve } from "node:path";
-import { mkdirSync, rmSync } from "node:fs";
+import { existsSync, mkdirSync, rmSync } from "node:fs";
 import { execFile } from "node:child_process";
 import { loadConfig } from "./config.js";
 import { getDatabase, closeDatabase } from "./db/index.js";
@@ -95,6 +95,8 @@ if (config.jwtSecret === "vlmp-dev-secret-change-me") {
   );
 }
 
+// VLMP_CORS_ORIGIN is honored from vlmp.env only because loadConfig() above
+// already applied the file to process.env — keep any direct env reads AFTER it.
 await app.register(cors, {
   origin:
     process.env.VLMP_CORS_ORIGIN?.split(",").map((s) => s.trim()) || false,
@@ -105,7 +107,16 @@ await app.register(rateLimit, {
   timeWindow: "1 minute",
 });
 
-const clientDir = resolve(import.meta.dirname, "../../client/public");
+// Client dir depends on how we're running: tsx (server/src → root/client) and
+// the installer layout (app/server/src → app/client) are two levels up;
+// compiled `npm start` (dist/server/src → root/client) is three. Pick the
+// first that exists — dist/client/public is never emitted by tsc.
+const clientCandidates = [
+  resolve(import.meta.dirname, "../../client/public"),
+  resolve(import.meta.dirname, "../../../client/public"),
+];
+const clientDir =
+  clientCandidates.find((d) => existsSync(d)) ?? clientCandidates[0];
 await app.register(fastifyStatic, {
   root: clientDir,
   prefix: "/",

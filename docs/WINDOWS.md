@@ -5,7 +5,20 @@ runbook for a Windows box, plus the Windows-specific behavior notes and the
 smoke-test checklist that gates the port (iOS server work is deferred until
 this checklist passes on real hardware).
 
-## Prerequisites
+## Installer (recommended)
+
+Build the installer from Linux/macOS: `installer/build.sh` → `installer/dist/vlmp-setup-<version>-win-x64.exe` (needs `apt install nsis`). It bundles the compiled server, web client, a portable Node.js runtime, production `node_modules` with win32 native bindings, and NSSM — FFmpeg is NOT bundled (the installer offers a winget install; VLMP warns at boot while it's missing).
+
+What the installed app does differently from a manual setup:
+
+- Data lives in `%ProgramData%\vlmp`, **ACL-locked to SYSTEM + Administrators** (standard users can otherwise create `vlmp.env` there and redirect `VLMP_FFMPEG_PATH` for a privileged process — the scripts fail closed if the lockdown can't be applied, e.g. non-NTFS volumes). Edit `vlmp.env` as Administrator.
+- The JWT secret is generated on first run into `%ProgramData%\vlmp\jwt.secret` and read via `VLMP_JWT_SECRET_FILE` — never placed on a command line or in the service registry key.
+- `start-vlmp.cmd` (Start Menu → "VLMP Server") self-elevates; "Install VLMP service" / "Remove VLMP service" shortcuts manage the NSSM service.
+- Uninstall keeps `%ProgramData%\vlmp` (library DB, settings, backups).
+
+The manual path below is for running from source.
+
+## Prerequisites (manual setup)
 
 ```powershell
 winget install OpenJS.NodeJS.LTS      # Node 22+
@@ -46,7 +59,11 @@ npm start
 First user to register becomes the admin; registration closes after that.
 Add library folders in Settings using Windows paths (`D:\Media\Movies`).
 
-## Run as a service (NSSM)
+## Run as a service (NSSM, manual setup)
+
+Installer users: just run the "Install VLMP service" Start Menu shortcut — it
+uses the bundled NSSM, a locked-down data dir, and `VLMP_JWT_SECRET_FILE`.
+Manual equivalent:
 
 ```powershell
 winget install NSSM.NSSM
@@ -80,9 +97,10 @@ netsh advfirewall firewall add rule name="VLMP" dir=in action=allow protocol=TCP
   `backups\`) from real-time scanning — AV file locks are the usual cause of
   EBUSY noise and slow segment serving.
 - **`server.key` permissions**: on POSIX the federation key is written mode
-  0600; Windows ignores POSIX modes and uses inherited ACLs. Keep
-  `VLMP_DATA_DIR` under a user profile or `C:\ProgramData\vlmp` with
-  restricted ACLs if the box is multi-user.
+  0600; Windows ignores POSIX modes and uses inherited ACLs. The installer's
+  scripts lock `%ProgramData%\vlmp` to SYSTEM + Administrators automatically;
+  in a manual setup keep `VLMP_DATA_DIR` under a user profile or apply
+  restricted ACLs yourself if the box is multi-user.
 - **Case-insensitive paths**: NTFS ignores case. Library folder paths are
   normalized on add, but don't add the same folder twice with different
   casing — SQLite's uniqueness check is case-sensitive.
@@ -111,6 +129,16 @@ Run on the Windows box, in order:
 11. Ctrl+C and `nssm stop vlmp` both shut down gracefully (DB checkpoint logged)
 12. Empty trash on scan: delete a media file, rescan → row pruned; unplug the
     drive entirely, rescan → rows kept (all-missing guard)
+
+Installer-specific additions:
+
+13. Run `vlmp-setup-*.exe` → "Start VLMP now" opens an elevated console,
+    <http://localhost:8080> loads, first registration becomes admin
+14. `icacls C:\ProgramData\vlmp` shows ONLY SYSTEM + Administrators;
+    `type C:\ProgramData\vlmp\jwt.secret` is non-empty (96 hex chars)
+15. "Install VLMP service" shortcut → service running, UI still up after
+    reboot; "Remove VLMP service" cleans it
+16. Uninstall → app dir + shortcuts + firewall rule gone, ProgramData data kept
 
 Anything failing here gets fixed before hardware transcoding (NVENC/QSV/AMF),
 mDNS discovery, or TLS-without-Caddy are started — see

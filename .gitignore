@@ -9,3 +9,6 @@ data/
 *.log
 .claude/agent-memory/
 .playwright-mcp/
+installer/staging/
+installer/cache/
+installer/dist/

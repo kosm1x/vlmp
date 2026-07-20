@@ -1,3 +1,4 @@
+import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
 
 export interface Config {
@@ -37,8 +38,55 @@ const X264_PRESETS = [
   "veryslow",
 ];
 
+// Optional KEY=VALUE config file at <dataDir>/vlmp.env — the Windows installer
+// points users there so console and service mode share one config surface.
+// Real environment variables always win; only VLMP_-prefixed keys are applied
+// (the file must not be able to alter PATH/NODE_OPTIONS); VLMP_DATA_DIR itself
+// can't come from the file because it's what locates the file.
+function applyEnvFile(dataDir: string): void {
+  let raw: string;
+  try {
+    raw = readFileSync(resolve(dataDir, "vlmp.env"), "utf-8");
+  } catch {
+    return;
+  }
+  for (const line of raw.split(/\r?\n/)) {
+    const trimmed = line.trim();
+    if (!trimmed || trimmed.startsWith("#")) continue;
+    const eq = trimmed.indexOf("=");
+    if (eq <= 0) continue;
+    const key = trimmed.slice(0, eq).trim();
+    if (!/^VLMP_[A-Z0-9_]+$/.test(key) || key === "VLMP_DATA_DIR") continue;
+    if (process.env[key] !== undefined) continue;
+    process.env[key] = trimmed.slice(eq + 1).trim();
+  }
+}
+
+// VLMP_JWT_SECRET wins; VLMP_JWT_SECRET_FILE lets the Windows service (and
+// docker-secrets style setups) avoid putting the secret on a command line or
+// in the registry. A set-but-unreadable file is a hard error — falling back to
+// the dev default would demote a configured production secret silently.
+function loadJwtSecret(): string {
+  if (process.env.VLMP_JWT_SECRET) return process.env.VLMP_JWT_SECRET;
+  const file = process.env.VLMP_JWT_SECRET_FILE;
+  if (file) {
+    let secret = "";
+    try {
+      secret = readFileSync(file, "utf-8").trim();
+    } catch (err) {
+      throw new Error(
+        `VLMP_JWT_SECRET_FILE is set but unreadable: ${file} (${err})`,
+      );
+    }
+    if (!secret) throw new Error(`VLMP_JWT_SECRET_FILE is empty: ${file}`);
+    return secret;
+  }
+  return "vlmp-dev-secret-change-me";
+}
+
 export function loadConfig(): Config {
   const dataDir = resolve(process.env.VLMP_DATA_DIR || "./data");
+  applyEnvFile(dataDir);
   const port = parseInt(process.env.VLMP_PORT || "8080", 10);
   if (port < 1 || port > 65535 || isNaN(port)) {
     throw new Error(`Invalid port: ${process.env.VLMP_PORT}. Must be 1-65535.`);
@@ -108,7 +156,7 @@ export function loadConfig(): Config {
     dbPath: resolve(dataDir, "vlmp.db"),
     ffmpegPath: process.env.VLMP_FFMPEG_PATH || "ffmpeg",
     ffprobePath: process.env.VLMP_FFPROBE_PATH || "ffprobe",
-    jwtSecret: process.env.VLMP_JWT_SECRET || "vlmp-dev-secret-change-me",
+    jwtSecret: loadJwtSecret(),
     jwtExpiresIn: process.env.VLMP_JWT_EXPIRES_IN || "24h",
     tmdbApiKey,
     transcodeTmpDir: resolve(dataDir, "transcode"),
