@@ -8,8 +8,11 @@ this checklist passes on real hardware).
 ## Installer (recommended)
 
 Download `vlmp-setup-<version>-win-x64.exe` from
-<https://github.com/kosm1x/vlmp/releases> (v0.1.0 published 2026-07-20;
+<https://github.com/kosm1x/vlmp/releases> (v0.1.1 published 2026-07-20;
 SmartScreen warns on unsigned installers — "More info → Run anyway").
+v0.1.0 had a launcher ACL bug that left `jwt.secret` with an empty DACL on
+the second start (EPERM at boot) — upgrade, or repair in place with
+`icacls C:\ProgramData\vlmp\* /reset /t /c` from an elevated prompt.
 Or build it from Linux/macOS: `installer/build.sh` → `installer/dist/vlmp-setup-<version>-win-x64.exe` (needs `apt install nsis`). It bundles the compiled server, web client, a portable Node.js runtime, production `node_modules` with win32 native bindings, and NSSM — FFmpeg is NOT bundled (the installer offers a winget install; VLMP warns at boot while it's missing).
 
 What the installed app does differently from a manual setup:
