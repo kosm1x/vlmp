@@ -3,12 +3,25 @@ import { mkdirSync, existsSync } from "node:fs";
 import { join } from "node:path";
 import type { Config } from "../config.js";
 import type { TranscodeProfile } from "./adaptive.js";
+import { getFfmpegCaps } from "./ffmpeg-caps.js";
+
+export const SEGMENT_SECONDS = 6;
+// 1.5x playback speed keeps the encoder comfortably ahead of the player
+// without racing the whole file at max speed (the pre-v0.1.4 behavior pegged
+// every core for minutes). The initial burst encodes the first 2 minutes
+// unpaced so startup and near seeks stay instant.
+const READRATE = 1.5;
+const READRATE_BURST_SECONDS = 120;
 
 export interface TranscodeJob {
   process: ChildProcess;
   outputDir: string;
   profile: TranscodeProfile;
   startedAt: number;
+  /** First HLS segment number this job produces (0 unless a seek restart). */
+  startNumber: number;
+  /** Last time a playlist/segment request touched this job — reaper input. */
+  lastAccessed: number;
   exited: boolean;
   exitCode: number | null;
 }
@@ -18,7 +31,7 @@ export function startTranscode(
   sessionId: string,
   profile: TranscodeProfile,
   config: Config,
-  options?: { startTime?: number; audioTrack?: number },
+  options?: { startTime?: number; audioTrack?: number; startNumber?: number },
 ): TranscodeJob {
   if (inputPath.startsWith("-")) throw new Error("Invalid input path");
   const outputDir = join(config.transcodeTmpDir, sessionId, profile.name);
@@ -28,6 +41,12 @@ export function startTranscode(
   const args: string[] = ["-hide_banner", "-loglevel", "warning"];
   if (options?.startTime && options.startTime > 0)
     args.push("-ss", String(options.startTime));
+  const caps = getFfmpegCaps(config.ffmpegPath);
+  if (caps.readrate) {
+    args.push("-readrate", String(READRATE));
+    if (caps.readrateInitialBurst)
+      args.push("-readrate_initial_burst", String(READRATE_BURST_SECONDS));
+  }
   args.push(
     "-i",
     inputPath,
@@ -61,17 +80,24 @@ export function startTranscode(
   if (options?.audioTrack !== undefined)
     args.push("-map", "0:v:0", "-map", `0:a:${options.audioTrack}`);
   else args.push("-map", "0:v:0", "-map", "0:a:0?");
+  const startNumber = options?.startNumber ?? 0;
   args.push(
     "-f",
     "hls",
     "-hls_time",
-    "6",
+    String(SEGMENT_SECONDS),
+    "-start_number",
+    String(startNumber),
     "-hls_list_size",
     "0",
     "-hls_segment_type",
     "mpegts",
+    // temp_file: write segments to .tmp then rename, so the existence checks
+    // in waitForSegment/ensureSegmentReady can never see (and serve) a
+    // half-written segment — paced encoding makes that race the NORMAL case
+    // for near-frontier requests, not an edge.
     "-hls_flags",
-    "independent_segments",
+    "independent_segments+temp_file",
     "-hls_segment_filename",
     segmentPath,
     playlistPath,
@@ -84,6 +110,8 @@ export function startTranscode(
     outputDir,
     profile,
     startedAt: Date.now(),
+    startNumber,
+    lastAccessed: Date.now(),
     exited: false,
     exitCode: null,
   };

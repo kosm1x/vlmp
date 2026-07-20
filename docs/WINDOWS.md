@@ -161,7 +161,12 @@ Run on the Windows box, in order:
    duplicate rows after a second scan
 5. Drop a new file into the library while running → watcher picks it up with
    a well-formed path (check Settings/DB: no mixed `/`+`\` paths)
-6. Direct play + transcode play both work; seek works
+6. Direct play + transcode play both work; seek works — including a far
+   forward seek (jump 10+ min ahead: the encoder restarts at the position,
+   expect ~2–4s of buffering) and a seek back before that point. CPU during
+   transcode playback settles under ~20% after the first ~2 minutes (the
+   initial burst encodes ahead at full speed, then `-readrate` pacing kicks
+   in — v0.1.4); `Get-Process ffmpeg` shows ONE process per active stream
 7. Stop playback → after ~2s the session's transcode dir is gone
 8. Kill the process mid-transcode (Task Manager) → restart boots clean and
    sweeps the orphaned transcode dir

@@ -21,10 +21,11 @@ import {
   createSession,
   getSession,
   startProfileTranscode,
+  ensureSegmentReady,
   destroySession,
   hasEnoughDiskSpace,
 } from "../streaming/session.js";
-import { waitForPlaylist, waitForSegment } from "../streaming/transcoder.js";
+import { waitForPlaylist } from "../streaming/transcoder.js";
 import { parseIntParam, parseJsonColumn } from "./params.js";
 
 export function registerFederationApiRoutes(
@@ -238,6 +239,9 @@ export function registerFederationApiRoutes(
           undefined;
         if (!job) return reply.code(404).send({ error: "Profile not found" });
       }
+      // Peer players poll the active level's playlist — liveness signal that
+      // keeps the idle-job reaper away.
+      job.lastAccessed = Date.now();
       try {
         await waitForPlaylist(job);
       } catch {
@@ -268,16 +272,22 @@ export function registerFederationApiRoutes(
       if (!isPathInside(job.outputDir, segmentPath)) {
         return reply.code(400).send({ error: "Invalid segment path" });
       }
-      if (!existsSync(segmentPath)) {
-        try {
-          await waitForSegment(job, request.params.segment);
-        } catch {
-          return reply.code(404).send({ error: "Segment not available" });
-        }
+      // Paced encoders don't have the whole file ready — wait when the
+      // segment is imminent, restart ffmpeg at the position when it isn't.
+      let readyPath: string;
+      try {
+        readyPath = await ensureSegmentReady(
+          session,
+          request.params.profile,
+          request.params.segment,
+          config,
+        );
+      } catch {
+        return reply.code(404).send({ error: "Segment not available" });
       }
       return reply
         .header("Content-Type", "video/mp2t")
-        .send(createReadStream(segmentPath));
+        .send(createReadStream(readyPath));
     },
   );
 

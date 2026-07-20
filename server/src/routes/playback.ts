@@ -16,11 +16,12 @@ import {
   createSession,
   getSession,
   startProfileTranscode,
+  ensureSegmentReady,
   destroySession,
   getActiveSessions,
   hasEnoughDiskSpace,
 } from "../streaming/session.js";
-import { waitForPlaylist, waitForSegment } from "../streaming/transcoder.js";
+import { waitForPlaylist } from "../streaming/transcoder.js";
 import { parseIntParam, parseJsonColumn } from "./params.js";
 
 interface MediaRow {
@@ -212,6 +213,9 @@ export function registerPlaybackRoutes(
           undefined;
         if (!job) return reply.code(404).send({ error: "Profile not found" });
       }
+      // hls.js polls the active level's playlist while streaming — this is
+      // the liveness signal that keeps the idle-job reaper away.
+      job.lastAccessed = Date.now();
       try {
         await waitForPlaylist(job);
       } catch {
@@ -240,16 +244,23 @@ export function registerPlaybackRoutes(
       if (!isPathInside(job.outputDir, segmentPath)) {
         return reply.code(400).send({ error: "Invalid segment path" });
       }
-      if (!existsSync(segmentPath)) {
-        try {
-          await waitForSegment(job, request.params.segment);
-        } catch {
-          return reply.code(404).send({ error: "Segment not available" });
-        }
+      // Paced encoders don't have the whole file ready — this waits for the
+      // encoder when the segment is imminent, or restarts ffmpeg at the
+      // requested position (far seek / dead job) and resolves to the path.
+      let readyPath: string;
+      try {
+        readyPath = await ensureSegmentReady(
+          session,
+          request.params.profile,
+          request.params.segment,
+          config,
+        );
+      } catch {
+        return reply.code(404).send({ error: "Segment not available" });
       }
       return reply
         .header("Content-Type", "video/mp2t")
-        .send(createReadStream(segmentPath));
+        .send(createReadStream(readyPath));
     },
   );
 

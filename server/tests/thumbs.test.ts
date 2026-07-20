@@ -103,6 +103,41 @@ describe.skipIf(process.platform === "win32")("getOrCreateThumb", () => {
     expect(runCount()).toBe(0);
   });
 
+  it("caps concurrent ffmpeg grabs across different media (global pool)", async () => {
+    // Each stub run takes 0.5s. Firing 5 distinct media at once must not run
+    // 5 ffmpegs — the pool admits 2 at a time (v0.1.4 CPU fix: a 60-card
+    // category grid used to fan out 60 concurrent frame-grabs).
+    const SLOW_STUB = `#!/bin/sh
+echo run >> "$(dirname "$0")/runs"
+sleep 0.5
+for a in "$@"; do out="$a"; done
+printf 'JPGDATA' > "$out"
+`;
+    cfg.ffmpegPath = stubFFmpeg(SLOW_STUB);
+    const folder = db
+      .prepare(
+        "INSERT INTO library_folders (path, category, is_visible, is_searchable) VALUES ('/pool', 'movies', 1, 1) RETURNING id",
+      )
+      .get() as { id: number };
+    const ids = Array.from(
+      { length: 5 },
+      (_, i) =>
+        (
+          db
+            .prepare(
+              "INSERT INTO media_items (library_folder_id, type, file_path, title, sort_title, duration) VALUES (?, 'movie', ?, 'V', 'v', 600) RETURNING id",
+            )
+            .get(folder.id, `/pool/v${i}.mp4`) as { id: number }
+        ).id,
+    );
+    const all = Promise.all(ids.map((id) => getOrCreateThumb(db, id, cfg)));
+    await new Promise((r) => setTimeout(r, 250));
+    expect(runCount()).toBeLessThanOrEqual(2); // only the pool is running
+    const results = await all;
+    expect(runCount()).toBe(5); // but everyone eventually ran
+    expect(results.every((r) => r !== null)).toBe(true);
+  });
+
   it("dedupes concurrent requests for the same media", async () => {
     cfg.ffmpegPath = stubFFmpeg(OK_STUB);
     const id = addMedia(1);

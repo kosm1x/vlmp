@@ -37,6 +37,25 @@ function failMarker(config: Config, mediaId: number): string {
 // each media id runs at most one ffmpeg at a time.
 const inFlight = new Map<number, Promise<string | null>>();
 
+// ...and a global cap on top: the category grid renders 60 cards at once, so
+// a first browse of a poster-less library would otherwise fan out 60
+// concurrent ffmpeg processes and peg every core. Grabs are ~1s each; a small
+// pool drains the burst quickly without competing with playback transcodes.
+const MAX_CONCURRENT_GRABS = 2;
+let activeGrabs = 0;
+const grabWaiters: Array<() => void> = [];
+
+async function acquireGrabSlot(): Promise<void> {
+  while (activeGrabs >= MAX_CONCURRENT_GRABS)
+    await new Promise<void>((resolve) => grabWaiters.push(resolve));
+  activeGrabs++;
+}
+
+function releaseGrabSlot(): void {
+  activeGrabs--;
+  grabWaiters.shift()?.();
+}
+
 export function getOrCreateThumb(
   db: Database.Database,
   mediaId: number,
@@ -75,21 +94,27 @@ async function generate(
   const duration = row.duration || 0;
   const seek = Math.max(1, Math.min(Math.floor(duration * 0.1), 600));
 
-  const ok = await runFFmpeg(config.ffmpegPath, [
-    "-nostdin",
-    "-ss",
-    String(seek),
-    "-i",
-    row.file_path,
-    "-frames:v",
-    "1",
-    "-vf",
-    `scale=${THUMB_WIDTH}:-2`,
-    "-q:v",
-    "4",
-    "-y",
-    out,
-  ]);
+  await acquireGrabSlot();
+  let ok: boolean;
+  try {
+    ok = await runFFmpeg(config.ffmpegPath, [
+      "-nostdin",
+      "-ss",
+      String(seek),
+      "-i",
+      row.file_path,
+      "-frames:v",
+      "1",
+      "-vf",
+      `scale=${THUMB_WIDTH}:-2`,
+      "-q:v",
+      "4",
+      "-y",
+      out,
+    ]);
+  } finally {
+    releaseGrabSlot();
+  }
   // ffmpeg can exit 0 yet write nothing (e.g. seek past EOF on a short file),
   // and a killed ffmpeg can leave a truncated file — both count as failure.
   if (ok && fileHasContent(out)) return out;

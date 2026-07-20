@@ -6,6 +6,7 @@ import { resolve } from "node:path";
 import { existsSync, mkdirSync, rmSync } from "node:fs";
 import { execFile } from "node:child_process";
 import { loadConfig } from "./config.js";
+import { parseFfmpegCaps, primeFfmpegCaps } from "./streaming/ffmpeg-caps.js";
 import { getDatabase, closeDatabase } from "./db/index.js";
 import { initSchema } from "./db/schema.js";
 import { resetInterruptedScans } from "./media/library.js";
@@ -59,11 +60,16 @@ for (const [name, bin] of [
   ["ffmpeg", config.ffmpegPath],
   ["ffprobe", config.ffprobePath],
 ] as const) {
-  execFile(bin, ["-version"], (err) => {
-    if (err)
+  execFile(bin, ["-version"], (err, stdout) => {
+    if (err) {
       console.warn(
         `[preflight] ${name} not found at "${bin}" — scanning/transcoding will fail. Install FFmpeg or set VLMP_${name.toUpperCase()}_PATH.`,
       );
+      return;
+    }
+    // Prime the transcode-pacing capability cache from this output so the
+    // first playback request doesn't pay a blocking `ffmpeg -version` probe.
+    if (name === "ffmpeg") primeFfmpegCaps(bin, parseFfmpegCaps(stdout));
   });
 }
 
