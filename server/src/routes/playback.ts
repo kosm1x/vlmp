@@ -1,7 +1,8 @@
 import type { FastifyInstance } from "fastify";
 import type Database from "better-sqlite3";
 import { createReadStream, existsSync } from "node:fs";
-import { join, extname, resolve } from "node:path";
+import { join, extname } from "node:path";
+import { isPathInside } from "../paths.js";
 import type { Config } from "../config.js";
 import { authMiddleware, adminOnly } from "../auth/middleware.js";
 import { validateGuestPass } from "../auth/guest.js";
@@ -236,7 +237,7 @@ export function registerPlaybackRoutes(
         return reply.code(400).send({ error: "Invalid segment name" });
       }
       const segmentPath = join(job.outputDir, request.params.segment);
-      if (!resolve(segmentPath).startsWith(resolve(job.outputDir))) {
+      if (!isPathInside(job.outputDir, segmentPath)) {
         return reply.code(400).send({ error: "Invalid segment path" });
       }
       if (!existsSync(segmentPath)) {

@@ -109,14 +109,23 @@ export function destroySession(id: string): void {
   for (const job of session.jobs.values()) {
     if (!job.process.killed) job.process.kill("SIGTERM");
   }
-  try {
-    const firstJob = session.jobs.values().next().value;
-    if (firstJob) {
-      const sessionDir = join(firstJob.outputDir, "..");
+  const firstJob = session.jobs.values().next().value;
+  if (firstJob) {
+    const sessionDir = join(firstJob.outputDir, "..");
+    try {
       rmSync(sessionDir, { recursive: true, force: true });
+    } catch {
+      // Windows: ffmpeg holds segment handles for a beat after kill(), so the
+      // immediate rm routinely fails EBUSY. One delayed retry; anything still
+      // stuck is caught by the boot-time sweep.
+      setTimeout(() => {
+        try {
+          rmSync(sessionDir, { recursive: true, force: true });
+        } catch {
+          /* boot sweep will get it */
+        }
+      }, 2000).unref();
     }
-  } catch {
-    /* best effort */
   }
   sessions.delete(id);
 }

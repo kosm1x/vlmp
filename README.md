@@ -162,7 +162,7 @@ vlmp/
 │           ├── ServerBrowse.js # Remote library browser
 │           └── HealthDashboard.js # Admin library health dashboard
 ├── client/public/previews/   # UI design concept previews (Lumiere, Oxide, etc.)
-└── server/tests/             # 205 tests across 27 files (vitest)
+└── server/tests/             # 213 tests across 28 files (vitest)
 ```
 
 ## API Overview

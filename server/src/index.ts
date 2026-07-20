@@ -4,6 +4,7 @@ import rateLimit from "@fastify/rate-limit";
 import fastifyStatic from "@fastify/static";
 import { resolve } from "node:path";
 import { mkdirSync, rmSync } from "node:fs";
+import { execFile } from "node:child_process";
 import { loadConfig } from "./config.js";
 import { getDatabase, closeDatabase } from "./db/index.js";
 import { initSchema } from "./db/schema.js";
@@ -39,9 +40,30 @@ const config = loadConfig();
 mkdirSync(config.dataDir, { recursive: true });
 // Sweep transcode segments orphaned by an unclean shutdown (the in-memory
 // session map is the only other cleanup path, and it dies with the process).
-rmSync(config.transcodeTmpDir, { recursive: true, force: true });
+// Guarded: on Windows a leftover handle on a segment file throws EBUSY/EPERM
+// (force:true only swallows ENOENT) and this runs at module eval, where the
+// uncaughtException handler can't save us — a failed sweep must not block boot.
+try {
+  rmSync(config.transcodeTmpDir, { recursive: true, force: true });
+} catch (err) {
+  console.warn("[boot] transcode-dir sweep incomplete:", err);
+}
 mkdirSync(config.transcodeTmpDir, { recursive: true });
 mkdirSync(config.subtitleDir, { recursive: true });
+
+// Preflight: fresh Windows installs commonly lack FFmpeg on PATH. Non-fatal —
+// direct play still works — but say so loudly instead of failing at first scan.
+for (const [name, bin] of [
+  ["ffmpeg", config.ffmpegPath],
+  ["ffprobe", config.ffprobePath],
+] as const) {
+  execFile(bin, ["-version"], (err) => {
+    if (err)
+      console.warn(
+        `[preflight] ${name} not found at "${bin}" — scanning/transcoding will fail. Install FFmpeg or set VLMP_${name.toUpperCase()}_PATH.`,
+      );
+  });
+}
 
 config.serverFingerprint = loadOrGenerateFingerprint(config.dataDir);
 
@@ -160,6 +182,9 @@ const shutdown = async () => {
 };
 process.on("SIGINT", shutdown);
 process.on("SIGTERM", shutdown);
+// Windows: Ctrl+Break (and some service managers) deliver SIGBREAK, not
+// SIGTERM. Registering it is a no-op on POSIX.
+process.on("SIGBREAK", shutdown);
 
 try {
   await app.listen({ port: config.port, host: config.host });

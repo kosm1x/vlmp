@@ -31,10 +31,16 @@ function pruneOldBackups(config: Config): void {
   }
   const backups = entries
     .filter((f) => f.startsWith(PREFIX) && f.endsWith(SUFFIX))
-    .map((f) => ({
-      path: join(config.backupDir, f),
-      mtime: statSync(join(config.backupDir, f)).mtimeMs,
-    }))
+    .flatMap((f) => {
+      const path = join(config.backupDir, f);
+      try {
+        return [{ path, mtime: statSync(path).mtimeMs }];
+      } catch {
+        // Vanished or locked (Windows AV scans backups) — skip this entry
+        // rather than aborting the whole prune.
+        return [];
+      }
+    })
     .sort((a, b) => b.mtime - a.mtime);
   for (const stale of backups.slice(config.backupRetention)) {
     try {

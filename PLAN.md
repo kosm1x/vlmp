@@ -71,6 +71,10 @@ Five-dimension adversarial audit (performance, code, logic, resilience, usabilit
 
 Closed-membership auth: registration bootstraps the first admin then closes; admin provisions accounts via `/admin/users`; per-request account/role re-check gives immediate revocation. Admin library gate: per-folder `is_visible`/`is_searchable` limiting non-admins across browse/search/detail/stream/recommendations (real 404 boundary), toggled in Settings. Adopted Plex options after an explicit config review (`docs/PLEX-CONFIG-REVIEW.md`): empty-trash on scan, scheduled SQLite backup, configurable x264 preset. First Lumiere Dark UI surface (Settings page). Audited R1+R2+R3 on the access-control surface. 205 tests passing.
 
+### Windows Port Prep -- COMPLETE (2026-07-20)
+
+Cross-platform correctness pass ahead of running the server on Windows (iOS server deferred until Windows is validated). Fixed the sweep-identified hazards: separator/case-robust `isPathInside` helper replacing three `startsWith` path-containment guards (subtitle serve + both segment routes — also closes the sibling-prefix-dir bypass on all OSes), `join()` in the folder watcher (mixed-separator paths), guarded boot-time transcode sweep (EBUSY must not block startup), `SIGBREAK` graceful shutdown, FFmpeg/FFprobe boot preflight warning, per-entry stat guard in backup prune (AV locks), delayed retry on session-dir deletion (ffmpeg handle lag), and `resolve()` normalization on library-folder ingestion (exact-string UNIQUE dedupe). Runbook + smoke-test checklist: `docs/WINDOWS.md`. Audited R1+R2 (both PASS, adjacent-surface sweep clean). 213 tests passing. Port-gated features (hardware transcoding, mDNS, TLS) start only after the checklist passes on real hardware.
+
 ### UI Design Direction -- IN PROGRESS
 
 Evaluated 6 concepts (Projectionist, Signal, Lumiere, Broadcast, Acetate, Oxide). Two approved:

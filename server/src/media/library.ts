@@ -1,5 +1,6 @@
 import type Database from "better-sqlite3";
 import { existsSync } from "node:fs";
+import { resolve } from "node:path";
 import type { Config } from "../config.js";
 import { discoverMedia } from "../scanner/discover.js";
 import { probeFile } from "../scanner/probe.js";
@@ -53,11 +54,14 @@ export function addLibraryFolder(
   path: string,
   category: MediaCategory,
 ): LibraryFolder {
+  // Normalize before storing: folder uniqueness is an exact-string UNIQUE, so
+  // `C:\Media` vs `C:/Media/` (or a trailing slash on POSIX) would otherwise
+  // create duplicate folder rows that each scan into duplicate media rows.
   return db
     .prepare(
       "INSERT INTO library_folders (path, category) VALUES (?, ?) ON CONFLICT(path) DO UPDATE SET category = excluded.category RETURNING *",
     )
-    .get(path, category) as LibraryFolder;
+    .get(resolve(path), category) as LibraryFolder;
 }
 
 export function getLibraryFolders(db: Database.Database): LibraryFolder[] {

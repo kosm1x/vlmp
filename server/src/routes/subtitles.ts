@@ -16,6 +16,7 @@ import {
 import { extractSubtitles } from "../subtitles/extract.js";
 import { probeFile } from "../scanner/probe.js";
 import { isMediaFolderVisible } from "../media/library.js";
+import { isPathInside } from "../paths.js";
 import { parseIntParam } from "./params.js";
 
 export function registerSubtitleRoutes(
@@ -89,9 +90,10 @@ export function registerSubtitleRoutes(
     if (!sub || sub.media_id !== mediaId)
       return reply.code(404).send({ error: "Subtitle not found" });
 
-    // Path traversal protection
+    // Path traversal protection (separator/case-robust; a bare startsWith
+    // also matched sibling dirs sharing the subtitleDir prefix)
     const normalizedPath = resolve(sub.file_path);
-    if (!normalizedPath.startsWith(config.subtitleDir)) {
+    if (!isPathInside(config.subtitleDir, normalizedPath)) {
       return reply.code(403).send({ error: "Forbidden" });
     }
 
