@@ -1,0 +1,40 @@
+services:
+  vlmp:
+    # Use the published image once you push one to GHCR:
+    #   image: ghcr.io/kosm1x/vlmp:latest
+    # Or build locally from the repo:
+    build: .
+    image: ghcr.io/kosm1x/vlmp:latest
+    container_name: vlmp
+    restart: unless-stopped
+    ports:
+      - "8080:8080"
+    environment:
+      # REQUIRED in production. Generate once with:  openssl rand -hex 32
+      VLMP_JWT_SECRET: "${VLMP_JWT_SECRET:?set VLMP_JWT_SECRET in your environment or .env file}"
+      # Optional: metadata enrichment
+      VLMP_TMDB_API_KEY: "${VLMP_TMDB_API_KEY:-}"
+      # Optional: federation identity
+      VLMP_SERVER_NAME: "${VLMP_SERVER_NAME:-VLMP}"
+      VLMP_PUBLIC_URL: "${VLMP_PUBLIC_URL:-}"
+      # Transcode tuning (see .env.example)
+      VLMP_MAX_TRANSCODE_SESSIONS: "${VLMP_MAX_TRANSCODE_SESSIONS:-4}"
+      VLMP_TRANSCODE_PRESET: "${VLMP_TRANSCODE_PRESET:-veryfast}"
+    volumes:
+      # Persistent state: SQLite db, transcode cache, backups
+      - ./data:/data
+      # Your media library — READ ONLY. Point the left side at your files.
+      # Add one line per library root; match the paths you register in the UI.
+      - /path/to/your/media:/media:ro
+      # Example of multiple roots:
+      # - /mnt/movies:/media/movies:ro
+      # - /mnt/tv:/media/tv:ro
+    healthcheck:
+      test: ["CMD", "node", "-e", "fetch('http://127.0.0.1:8080/').then(r=>process.exit(0)).catch(()=>process.exit(1))"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 20s
+
+# When you register library folders in the VLMP admin UI, use the CONTAINER
+# paths (e.g. /media/movies), not the host paths.

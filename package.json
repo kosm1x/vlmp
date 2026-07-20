@@ -1,8 +1,30 @@
 {
   "name": "vlmp",
   "version": "0.1.2",
-  "description": "Very Light Media Player",
+  "description": "Very Light Media Player — a featherweight, self-hosted media server with HLS streaming and a Netflix-like web client",
   "type": "module",
+  "license": "Apache-2.0",
+  "author": "kosm1x",
+  "homepage": "https://github.com/kosm1x/vlmp#readme",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/kosm1x/vlmp.git"
+  },
+  "bugs": {
+    "url": "https://github.com/kosm1x/vlmp/issues"
+  },
+  "keywords": [
+    "media-server",
+    "self-hosted",
+    "homelab",
+    "hls",
+    "ffmpeg",
+    "plex-alternative",
+    "streaming",
+    "preact",
+    "fastify",
+    "sqlite"
+  ],
   "scripts": {
     "dev": "tsx watch server/src/index.ts",
     "build": "tsc",
@@ -14,7 +36,6 @@
   "engines": {
     "node": ">=22"
   },
-  "private": true,
   "dependencies": {
     "@fastify/cors": "^11.2.0",
     "@fastify/rate-limit": "^10.3.0",

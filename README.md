@@ -1,6 +1,40 @@
-# VLMP - Very Light Media Player
+<div align="center">
 
-Personal media server with a robust Node.js backend and an ultra-light Netflix-like web client. The server handles all heavy lifting — transcoding, metadata, library scanning — while the client is a thin Preact shell that streams HLS adaptive video.
+# VLMP — Very Light Media Player
+
+**A featherweight, self-hosted media server.** One process, one SQLite file, a ~3KB web client with no build step, and HLS adaptive streaming. Runs on a Raspberry Pi, a $5 VPS, or an old laptop — and stays out of your way.
+
+[![License](https://img.shields.io/badge/license-Apache--2.0-blue.svg)](LICENSE)
+![Node](https://img.shields.io/badge/node-%3E%3D22-brightgreen.svg)
+![Tests](https://img.shields.io/badge/tests-242%20passing-brightgreen.svg)
+
+</div>
+
+---
+
+## Why another media server?
+
+I got tired of Plex's constant "improvements" pulling my own library further behind a cloud account, and Jellyfin never clicked for me. My library is several terabytes and I just wanted to reach _my_ catalog, anywhere, anytime — without a heavy .NET stack, without a build pipeline, without an account gateway between me and my own files.
+
+So VLMP is deliberately small. The server does the heavy lifting (transcoding, metadata, scanning); the client is a thin Preact shell served straight from disk with its dependencies vendored locally — no CDN, works offline, auditable in an afternoon. If your homelab philosophy is "fewer moving parts," this is built for you.
+
+## What this is — and isn't
+
+**It is:**
+
+- A single-process Node.js server + browser client for streaming your own media
+- Lightweight enough to run comfortably on modest hardware
+- Web-first: you watch in any modern browser, on any device with one
+- Security-conscious: multiple adversarial audit passes, closed-membership auth, HMAC-signed federation (see [Security](#security))
+- Federated: link your instance to a friend's and browse/play their library, NAT-safe and proxied
+
+**It is not** (yet, and maybe not ever — set your expectations):
+
+- A replacement for native TV apps. There is **no** Roku / Apple TV / Android TV / smart-TV client. You watch in a browser. If your primary need is a polished app _on the television_, Jellyfin or Plex will serve you better today.
+- A hardware-transcode powerhouse. Software x264 transcoding works; GPU transcoding is roadmap, not reality.
+- A commercial product with a support desk. This is a personal project shared in case it's useful. Best-effort support, no promises.
+
+If that scope fits how you actually watch, welcome.
 
 ## Features
 
@@ -9,357 +43,95 @@ Personal media server with a robust Node.js backend and an ultra-light Netflix-l
 - **Smart library scanning** — Recursive discovery with automatic classification (movies, TV, documentaries, education)
 - **TV show hierarchy** — Automatic season/episode detection from filenames (`S01E01`, `1x01`)
 - **Watch progress** — Resume where you left off, "Continue Watching" row
-- **Guest passes** — Share individual media items with time-limited, view-limited codes
-- **JWT authentication** — Stateless auth with admin/user roles
-- **TMDb metadata** — Automatic poster, backdrop, description, rating, genre enrichment via TMDb API
-- **Subtitle extraction** — Automatic VTT extraction from embedded subtitle tracks (FFmpeg)
-- **Playlists** — User-owned playlists with add/remove/reorder
-- **Media detail view** — Full detail page with backdrop, metadata, play button, subtitle list, playlist picker
-- **Server federation** — Link VLMP instances to browse and play remote media, all proxied (NAT-safe)
-- **HMAC-SHA256 federation auth** — Shared secret signing with replay protection, invite-based linking
-- **Security hardened** — CSP, HSTS, rate limiting, input validation, HMAC subtitle tokens, session ID validation, QA-audited (27 fixes)
-- **Algorithmic recommendations** — 5-strategy engine (next episode, collaborative filtering, genre matching, similar items, popularity) with no external AI APIs
-- **User preferences** — Like/dislike with recommendation cache invalidation
-- **Library health dashboard** — 8 checks (missing files, zero-byte, metadata gaps, no subtitles, codec/resolution analysis, orphaned entries, duplicates) with admin cleanup
-- **Ultra-light client** — Preact + HTM vendored locally (~3KB framework, works fully offline), no build step
-- **Dark retro-modern UI** — Responsive grid layout with category browsing, search, ARIA labels. Two approved design directions: Lumiere Dark (editorial serif) and Oxide (Hi-Fi faceplate)
+- **Guest passes** — Share a single item with time-limited, view-limited codes
+- **Closed-membership auth** — First registration bootstraps the admin, then registration closes; admin provisions accounts; per-request role re-check for instant revocation
+- **TMDb metadata** — Posters, backdrops, descriptions, ratings, genres
+- **Thumbnails for personal media** — Anything TMDb can't match gets an FFmpeg frame-grab thumbnail, generated on first view
+- **Subtitle extraction** — On-demand VTT extraction from embedded tracks (scan-time pre-extraction opt-in)
+- **Playlists** — User-owned, add/remove/reorder
+- **Server federation** — Link instances to browse and play remote media, all proxied (NAT-safe), HMAC-SHA256 signed with replay protection
+- **Algorithmic recommendations** — 5-strategy engine (next episode, collaborative filtering, genre matching, similar items, popularity) with **no external AI APIs**
+- **Library health dashboard** — 8 checks (missing files, zero-byte, metadata gaps, no subtitles, codec/resolution analysis, orphans, duplicates) with admin cleanup
+- **Ultra-light client** — Preact + HTM vendored locally (~3KB framework, no build step, works offline)
 
-## Requirements
+## Quick start
 
-- **Node.js** >= 22
-- **FFmpeg** + **FFprobe** installed and available in `$PATH`
-
-## Quick Start
-
-**Windows**: grab `vlmp-setup-<version>-win-x64.exe` from the
-[releases page](https://github.com/kosm1x/vlmp/releases) — self-contained
-(bundles Node runtime + service helper; offers an FFmpeg install). Details:
-[docs/WINDOWS.md](docs/WINDOWS.md). Build it yourself with
-`installer/build.sh` (Linux/macOS, needs `nsis`).
-
-From source:
+### Docker (recommended)
 
 ```bash
-# Clone and install
+# 1. Grab the compose file
+curl -fsSL https://raw.githubusercontent.com/kosm1x/vlmp/master/docker-compose.yml -o docker-compose.yml
+
+# 2. Set a real JWT secret and point it at your media
+export VLMP_JWT_SECRET="$(openssl rand -hex 32)"
+#    edit docker-compose.yml: mount your media folder at /media (read-only)
+
+# 3. Up
+docker compose up -d
+
+# 4. Open http://localhost:8080 — the first account you register becomes admin
+```
+
+### From source
+
+```bash
 git clone https://github.com/kosm1x/vlmp.git
 cd vlmp
 npm install
-
-# Start in development mode (auto-reload)
-npm run dev
-
-# Open http://localhost:8080
-# Register the first user (automatically becomes admin)
+npm run dev          # dev server with auto-reload
+# open http://localhost:8080 and register the first (admin) user
 ```
+
+Requires **Node.js >= 22** and **FFmpeg + FFprobe** in your `$PATH`.
+
+### Windows
+
+Grab `vlmp-setup-<version>-win-x64.exe` from the [releases page](https://github.com/kosm1x/vlmp/releases) — self-contained (bundles the Node runtime + a service helper, offers to install FFmpeg). Details in [docs/WINDOWS.md](docs/WINDOWS.md).
+
+## Reaching it from anywhere (safely)
+
+VLMP binds to your LAN by default. To get "anywhere, anytime" **do not port-forward it raw to the internet** — put it behind something:
+
+- **Easiest & safest:** a mesh VPN like [Tailscale](https://tailscale.com) or [WireGuard](https://www.wireguard.com). Your devices join a private network; the server is never publicly exposed.
+- **Public with TLS:** a reverse proxy that terminates HTTPS — [Caddy](https://caddyserver.com) (automatic Let's Encrypt) or nginx — in front of VLMP. Or a [Cloudflare Tunnel](https://developers.cloudflare.com/cloudflare-one/connections/connect-networks/) to avoid opening any inbound port.
+
+Native TLS inside VLMP is on the roadmap but not shipped; today, terminate TLS at the proxy.
 
 ## Configuration
 
-All configuration is via environment variables:
+All configuration is via environment variables. The important ones:
 
-| Variable                      | Default                     | Description                                                              |
-| ----------------------------- | --------------------------- | ------------------------------------------------------------------------ |
-| `VLMP_PORT`                   | `8080`                      | HTTP server port                                                         |
-| `VLMP_HOST`                   | `0.0.0.0`                   | Bind address                                                             |
-| `VLMP_DATA_DIR`               | `./data`                    | Data directory (database, transcode cache)                               |
-| `VLMP_JWT_SECRET`             | `vlmp-dev-secret-change-me` | JWT signing secret (**change in production**)                            |
-| `VLMP_JWT_EXPIRES_IN`         | `24h`                       | JWT token lifetime                                                       |
-| `VLMP_FFMPEG_PATH`            | `ffmpeg`                    | Path to FFmpeg binary                                                    |
-| `VLMP_FFPROBE_PATH`           | `ffprobe`                   | Path to FFprobe binary                                                   |
-| `VLMP_TMDB_API_KEY`           | _(empty)_                   | TMDb API key for metadata enrichment                                     |
-| `VLMP_SERVER_NAME`            | `VLMP`                      | Display name for this server in federation                               |
-| `VLMP_PUBLIC_URL`             | _(empty)_                   | Public URL of this server (for federation linking)                       |
-| `VLMP_MAX_TRANSCODE_SESSIONS` | `4`                         | Max concurrent transcode sessions (direct play uncapped)                 |
-| `VLMP_MIN_FREE_DISK_MB`       | `2048`                      | Free-space floor on the transcode volume; new transcodes refuse below it |
-| `VLMP_TRANSCODE_PRESET`       | `veryfast`                  | x264 preset (ultrafast…veryslow); trade CPU for quality                  |
-| `VLMP_EMPTY_TRASH_ON_SCAN`    | `true`                      | Prune DB rows for deleted/renamed files at end of each scan              |
-| `VLMP_BACKUP_INTERVAL_HOURS`  | `24`                        | Scheduled SQLite backup interval in hours (0 disables)                   |
-| `VLMP_BACKUP_RETENTION`       | `7`                         | Number of DB backups to keep                                             |
+| Variable            | Default                     | Description                                           |
+| ------------------- | --------------------------- | ----------------------------------------------------- |
+| `VLMP_PORT`         | `8080`                      | HTTP server port                                      |
+| `VLMP_DATA_DIR`     | `./data`                    | Database + transcode cache                            |
+| `VLMP_JWT_SECRET`   | `vlmp-dev-secret-change-me` | **Change this in production** (or use `_SECRET_FILE`) |
+| `VLMP_TMDB_API_KEY` | _(empty)_                   | TMDb key for metadata enrichment                      |
+| `VLMP_SERVER_NAME`  | `VLMP`                      | Display name in federation                            |
+| `VLMP_PUBLIC_URL`   | _(empty)_                   | Public URL for federation linking                     |
 
-## Scripts
-
-| Command              | Description                                   |
-| -------------------- | --------------------------------------------- |
-| `npm run dev`        | Start dev server with auto-reload (tsx watch) |
-| `npm run build`      | Compile TypeScript to `dist/`                 |
-| `npm start`          | Run compiled server                           |
-| `npm test`           | Run test suite (vitest)                       |
-| `npm run test:watch` | Run tests in watch mode                       |
-| `npm run typecheck`  | Type-check without emitting                   |
+The full list (transcode limits, free-disk floor, scheduled backups, x264 preset, empty-trash-on-scan) is documented in [`.env.example`](.env.example).
 
 ## Architecture
 
-```
-vlmp/
-├── server/src/
-│   ├── index.ts              # Fastify entry point, CORS, static files, graceful shutdown
-│   ├── config.ts             # Environment variable loading
-│   ├── auth/
-│   │   ├── jwt.ts            # JWT issue/verify (jose, HS256)
-│   │   ├── passwords.ts      # bcrypt hash/verify (12 rounds)
-│   │   ├── middleware.ts      # Fastify preHandler auth guard
-│   │   └── guest.ts          # Guest pass creation/validation
-│   ├── db/
-│   │   ├── index.ts          # SQLite singleton (WAL, sync=NORMAL, 8MB cache)
-│   │   ├── schema.ts         # 20 tables, 18 indexes
-│   │   └── cleanup.ts        # Hourly expired row cleanup (sessions, invites, cache)
-│   ├── scanner/
-│   │   ├── discover.ts       # Recursive file walker (22 video/audio formats)
-│   │   ├── classify.ts       # Folder-based categorization + filename parsing
-│   │   ├── probe.ts          # FFprobe wrapper (duration, codecs, resolution)
-│   │   └── watcher.ts        # fs.watch for library changes
-│   ├── media/
-│   │   ├── library.ts        # Library CRUD, scanning, browse/search/filter
-│   │   └── playlists.ts      # Playlist CRUD, ownership, reorder
-│   ├── metadata/
-│   │   ├── tmdb.ts           # TMDb API client (search, detail, v3/v4 key)
-│   │   └── matcher.ts        # Auto-match + manual match with cache
-│   ├── subtitles/
-│   │   ├── extract.ts        # FFmpeg subtitle demuxing to VTT
-│   │   └── service.ts        # Subtitle DB operations
-│   ├── streaming/
-│   │   ├── direct.ts         # Byte-range serving for compatible formats
-│   │   ├── adaptive.ts       # 4 transcode profiles, bandwidth selection
-│   │   ├── transcoder.ts     # FFmpeg HLS pipeline (segments + playlists)
-│   │   └── session.ts        # In-memory session manager, idle timeout cleanup
-│   ├── federation/
-│   │   ├── crypto.ts         # HMAC-SHA256 signing, fingerprint, secrets
-│   │   ├── middleware.ts     # Federation auth preHandler (HMAC verification)
-│   │   ├── linking.ts        # Invite flow, server CRUD
-│   │   ├── client.ts         # Outbound signed fetch to peer servers
-│   │   ├── proxy.ts          # Library/stream proxy, M3U8 URL rewriting
-│   │   └── health.ts         # Heartbeat loop (5min, auto-offline after 3 failures)
-│   ├── ai/
-│   │   ├── viewing-log.ts    # Viewing history tracking with 5-min dedup
-│   │   ├── preferences.ts    # Like/dislike user preference CRUD
-│   │   ├── cache.ts          # TTL-based recommendation cache
-│   │   ├── recommender.ts    # 5-strategy recommendation engine
-│   │   └── health.ts         # Library health checks + orphan cleanup
-│   └── routes/
-│       ├── params.ts         # Shared route parameter validation
-│       ├── auth.ts           # Register, login, guest pass endpoints
-│       ├── library.ts        # Browse, search, TV shows, admin folder management
-│       ├── metadata.ts       # TMDb search proxy, match, batch scan
-│       ├── subtitles.ts      # Subtitle list, file serving, manual extraction
-│       ├── playlists.ts      # Playlist CRUD, item management, reorder
-│       ├── playback.ts       # Stream start, HLS manifests/segments, direct play
-│       ├── progress.ts       # Watch progress save/resume, viewing log integration
-│       ├── recommendations.ts # Personalized recs, similar items, preferences
-│       ├── health.ts         # Admin library health report + cleanup
-│       ├── federation.ts     # Federation admin + proxy routes (JWT auth)
-│       └── federation-api.ts # Peer-facing federation API (HMAC auth)
-├── client/public/
-│   ├── index.html            # Entry point (import map → /vendor, HLS.js)
-│   ├── vendor/               # Vendored preact, htm, hls.js (no CDN dependency)
-│   ├── styles/main.css       # Dark theme, responsive layout
-│   └── src/
-│       ├── app.js            # Preact root, route handling
-│       ├── api.js            # Fetch wrapper with JWT management
-│       ├── router.js         # Hash-based SPA router
-│       └── components/
-│           ├── Login.js      # Register/sign-in form
-│           ├── Shell.js      # Navigation bar, search
-│           ├── Browse.js     # Category rows (Continue Watching, Recently Added, etc.)
-│           ├── MediaRow.js   # Horizontal scrollable card row
-│           ├── MediaCard.js  # Poster card with progress overlay, detail-first navigation
-│           ├── MediaDetail.js # Detail page (backdrop, metadata, play, playlist picker)
-│           ├── Search.js     # Search results grid
-│           ├── Player.js     # Video player (HLS.js, subtitles, seek, volume, speed, fullscreen)
-│           ├── Playlists.js  # Playlist list + create
-│           ├── PlaylistDetail.js # Single playlist view with items
-│           ├── Servers.js    # Federated server list, invite/link admin
-│           ├── ServerBrowse.js # Remote library browser
-│           └── HealthDashboard.js # Admin library health dashboard
-├── client/public/previews/   # UI design concept previews (Lumiere, Oxide, etc.)
-└── server/tests/             # 220 tests across 29 files (vitest)
-```
+Node.js 22 + TypeScript + Fastify 5 on the server; SQLite (WAL) for state; FFmpeg for transcoding; Preact + HTM + HLS.js on the client. Federation is HMAC-SHA256 signed with a 300s replay window and proxies all remote traffic through the local server, so clients never talk to peers directly.
 
-## API Overview
+The full module map and REST API reference live in the source tree under [`server/src/`](server/src) — each subsystem (auth, scanner, streaming, federation, metadata, subtitles, recommendations) is its own directory with routes under `server/src/routes/`.
 
-### Authentication
+## Contributing
 
-| Method | Endpoint            | Description                         |
-| ------ | ------------------- | ----------------------------------- |
-| POST   | `/auth/register`    | Register (first user becomes admin) |
-| POST   | `/auth/login`       | Login, returns JWT                  |
-| POST   | `/auth/guest`       | Create guest pass for a media item  |
-| GET    | `/auth/guest/:code` | Validate guest pass                 |
+This is primarily a personal project, but issues and PRs are welcome. Please read [CONTRIBUTING.md](CONTRIBUTING.md) first — it sets honest expectations on scope and response times.
 
-### Library
+## Security
 
-| Method | Endpoint                | Description                                     |
-| ------ | ----------------------- | ----------------------------------------------- |
-| GET    | `/library/browse`       | Browse media (filter by type, category, search) |
-| GET    | `/library/recent`       | Recently added items                            |
-| GET    | `/library/:id`          | Single media item                               |
-| GET    | `/library/tv/shows`     | All TV shows                                    |
-| GET    | `/library/tv/shows/:id` | Show detail with seasons/episodes               |
-
-### Admin
-
-| Method | Endpoint                            | Description                          |
-| ------ | ----------------------------------- | ------------------------------------ |
-| GET    | `/admin/folders`                    | List library folders                 |
-| POST   | `/admin/folders`                    | Add library folder (path + category) |
-| DELETE | `/admin/folders/:id`                | Remove library folder                |
-| POST   | `/admin/folders/:id/scan`           | Trigger folder scan                  |
-| POST   | `/admin/metadata/:id/match`         | Auto or manual TMDb match            |
-| POST   | `/admin/metadata/scan`              | Batch match all unmatched items      |
-| POST   | `/admin/metadata/tv/:showId/match`  | Match a TV show                      |
-| POST   | `/admin/subtitles/:mediaId/extract` | Manually trigger subtitle extraction |
-
-### Metadata
-
-| Method | Endpoint           | Description                                    |
-| ------ | ------------------ | ---------------------------------------------- |
-| GET    | `/metadata/search` | Proxy TMDb search (query: `q`, `type`, `year`) |
-
-### Subtitles
-
-| Method | Endpoint                                | Description                                |
-| ------ | --------------------------------------- | ------------------------------------------ |
-| GET    | `/subtitles/:mediaId`                   | List subtitles for media item              |
-| GET    | `/subtitles/:mediaId/:subtitleId/token` | Get short-lived HMAC token for file access |
-| GET    | `/subtitles/:mediaId/:subtitleId/file`  | Serve VTT file (HMAC token in query)       |
-
-### Playlists
-
-| Method | Endpoint                       | Description             |
-| ------ | ------------------------------ | ----------------------- |
-| GET    | `/playlists`                   | List user's playlists   |
-| POST   | `/playlists`                   | Create playlist         |
-| GET    | `/playlists/:id`               | Get playlist with items |
-| PUT    | `/playlists/:id`               | Rename playlist         |
-| DELETE | `/playlists/:id`               | Delete playlist         |
-| POST   | `/playlists/:id/items`         | Add item to playlist    |
-| DELETE | `/playlists/:id/items/:itemId` | Remove item             |
-| PUT    | `/playlists/:id/reorder`       | Reorder items           |
-
-### Playback
-
-| Method | Endpoint                                    | Description                                |
-| ------ | ------------------------------------------- | ------------------------------------------ |
-| POST   | `/stream/:id/start`                         | Start stream session (direct or transcode) |
-| GET    | `/stream/:sessionId/direct`                 | Direct file stream (byte-range)            |
-| GET    | `/stream/:sessionId/master.m3u8`            | HLS master playlist                        |
-| GET    | `/stream/:sessionId/:profile/playlist.m3u8` | HLS variant playlist                       |
-| GET    | `/stream/:sessionId/:profile/:segment`      | HLS video segment                          |
-| DELETE | `/stream/:sessionId`                        | End stream session                         |
-
-### Progress
-
-| Method | Endpoint             | Description              |
-| ------ | -------------------- | ------------------------ |
-| GET    | `/progress/:mediaId` | Get watch progress       |
-| PUT    | `/progress/:mediaId` | Update watch position    |
-| GET    | `/progress/continue` | "Continue watching" list |
-
-### Recommendations & Preferences
-
-| Method | Endpoint                            | Description                               |
-| ------ | ----------------------------------- | ----------------------------------------- |
-| GET    | `/recommendations`                  | Personalized recommendations (cached 1hr) |
-| POST   | `/recommendations/refresh`          | Force recompute recommendations           |
-| GET    | `/recommendations/similar/:mediaId` | Similar items                             |
-| POST   | `/preferences/:mediaId`             | Set like/dislike preference               |
-| DELETE | `/preferences/:mediaId`             | Remove preference                         |
-| GET    | `/preferences`                      | List user preferences                     |
-
-### Library Health (Admin)
-
-| Method | Endpoint                | Description                      |
-| ------ | ----------------------- | -------------------------------- |
-| GET    | `/admin/health`         | Full library health report       |
-| GET    | `/admin/health/missing` | Missing files list               |
-| POST   | `/admin/health/cleanup` | Remove orphaned database entries |
-
-### Federation (Admin / Proxy)
-
-| Method | Endpoint                                        | Auth         | Description                        |
-| ------ | ----------------------------------------------- | ------------ | ---------------------------------- |
-| GET    | `/federation/servers`                           | JWT+admin    | List linked servers                |
-| POST   | `/federation/invite`                            | JWT+admin    | Generate invite token (1hr expiry) |
-| DELETE | `/federation/servers/:id`                       | JWT+admin    | Remove a linked server             |
-| POST   | `/federation/link`                              | invite token | Receive link request from remote   |
-| POST   | `/federation/link-remote`                       | JWT+admin    | Initiate link to another server    |
-| GET    | `/federation/servers/:id/library`               | JWT+admin    | Browse remote library (proxied)    |
-| GET    | `/federation/servers/:id/media/:mediaId`        | JWT+admin    | Remote media detail (proxied)      |
-| GET    | `/federation/servers/:id/tv/shows`              | JWT+admin    | Remote TV shows (proxied)          |
-| POST   | `/federation/servers/:id/stream/:mediaId/start` | JWT          | Start remote playback              |
-| GET    | `/federation/servers/:id/stream/:sessionId/*`   | JWT          | Proxy HLS content                  |
-| DELETE | `/federation/servers/:id/stream/:sessionId`     | JWT          | Stop remote playback               |
-
-### Federation API (Peer-to-Peer, HMAC auth)
-
-| Method | Endpoint                              | Description               |
-| ------ | ------------------------------------- | ------------------------- |
-| GET    | `/federation/api/library`             | Browse library (stripped) |
-| GET    | `/federation/api/media/:id`           | Media detail (stripped)   |
-| GET    | `/federation/api/tv/shows`            | TV show list              |
-| GET    | `/federation/api/tv/shows/:id`        | Show detail               |
-| POST   | `/federation/heartbeat`               | Health ping               |
-| POST   | `/federation/api/stream/:id/start`    | Start stream              |
-| GET    | `/federation/api/stream/:sessionId/*` | Serve HLS content         |
-| DELETE | `/federation/api/stream/:sessionId`   | Stop stream               |
-
-## Federation
-
-Two VLMP instances can link up so users on Server A can browse and play media from Server B, all proxied through Server A (NAT-safe — the client never talks directly to remote servers).
-
-### How to Link Servers
-
-1. **Server B admin** goes to Servers page and clicks "Generate Invite Token"
-2. **Server A admin** enters Server B's URL + invite token in the "Link to Server" form
-3. Both servers now show as `active` — Server A's users can browse and play Server B's library
-
-### Architecture
-
-- **HMAC-SHA256 auth** — Every cross-server request signed with 3 headers (`X-VLMP-Server-Id`, `X-VLMP-Timestamp`, `X-VLMP-Signature`), with 300s replay window
-- **Proxy pattern** — All federation traffic proxied through local server; HLS playlist URLs rewritten to local proxy paths
-- **Sensitive field stripping** — `file_path`, `file_size`, `library_folder_id` removed from all remote responses
-- **Health monitoring** — 5-minute heartbeat loop; server marked offline after 3 consecutive failures, auto-recovers on next success
-- **Config** — Set `VLMP_SERVER_NAME` and `VLMP_PUBLIC_URL` env vars for federation
-
-## Supported Formats
-
-**Video:** MKV, MP4, AVI, MOV, WMV, FLV, WebM, M4V, MPG, MPEG, TS, VOB, 3GP, OGV
-
-**Audio:** MP3, M4A, FLAC, AAC, OGG, WMA, WAV, OPUS
-
-**Direct play** (no transcode) requires: H.264/VP8/VP9/AV1 video + AAC/MP3/Opus/Vorbis/FLAC audio in MP4/WebM/M4V containers. Everything else is transcoded to HLS on-the-fly.
-
-## Media Organization
-
-VLMP classifies media by folder category. When adding a library folder, assign a category:
-
-| Category        | What it expects                                                |
-| --------------- | -------------------------------------------------------------- |
-| `movies`        | `Title (Year).ext` or any standalone video                     |
-| `tv`            | Files with `S01E01`, `1x01` patterns; folders like `Season 1/` |
-| `documentaries` | Single documentary files                                       |
-| `doc_series`    | Documentary series with episode patterns                       |
-| `education`     | Numbered lessons (e.g., `01 - Introduction.mp4`)               |
-| `other`         | Anything else                                                  |
-
-## Database
-
-SQLite with WAL journal mode for concurrent read/write. Tables include:
-
-`users`, `library_folders`, `media_items`, `tv_shows`, `seasons`, `episodes`, `doc_series`, `doc_series_episodes`, `guest_passes`, `watch_progress`, `playlists`, `playlist_items`, `subtitles`, `metadata_cache`, `federated_servers`, `federation_invites`, `viewing_log`, `user_preferences`, `ai_cache`, `schema_version`
-
-Database file: `data/vlmp.db`
-
-## Roadmap
-
-- [x] Phase 1 — Foundation (server, auth, scanner, library)
-- [x] Phase 2 — Core Playback (direct play, HLS transcoding, player)
-- [x] Phase 3 — Client UI (Netflix-like browse, search, responsive)
-- [x] Phase 4 — Media Management (TMDb metadata, subtitles, playlists)
-- [x] Phase 5 — Federation (HMAC auth, server linking, remote browse/play, heartbeat)
-- [x] Phase 6 — Hardening (security headers, rate limiting, input validation, subtitle auth, a11y)
-- [x] Phase 7 — AI Assistant (algorithmic recommendations, library health dashboard)
-- [x] QA Security Audit — 27 fixes (4 critical, 6 high, 9 medium, 8 low)
-- [ ] UI Redesign — Two approved directions: Lumiere Dark, Oxide (previews at `/previews/`)
+Found a vulnerability? Please **do not** open a public issue. See [SECURITY.md](SECURITY.md) for the private disclosure process. VLMP has been through multiple adversarial audit passes; findings and the deferred queue live in `docs/`.
 
 ## License
 
-Private project.
+[Apache License 2.0](LICENSE). You can use, modify, and redistribute it freely, including commercially, with attribution and the patent grant intact. See [NOTICE](NOTICE) for attribution details.
+
+---
+
+<div align="center">
+<sub>Built as an exercise in doing more with less. If it's useful to you, that's a bonus.</sub>
+</div>
