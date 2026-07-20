@@ -31,6 +31,14 @@ Personal media server with a robust Node.js backend and an ultra-light Netflix-l
 
 ## Quick Start
 
+**Windows**: grab `vlmp-setup-<version>-win-x64.exe` from the
+[releases page](https://github.com/kosm1x/vlmp/releases) — self-contained
+(bundles Node runtime + service helper; offers an FFmpeg install). Details:
+[docs/WINDOWS.md](docs/WINDOWS.md). Build it yourself with
+`installer/build.sh` (Linux/macOS, needs `nsis`).
+
+From source:
+
 ```bash
 # Clone and install
 git clone https://github.com/kosm1x/vlmp.git

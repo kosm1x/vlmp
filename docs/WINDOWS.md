@@ -7,7 +7,10 @@ this checklist passes on real hardware).
 
 ## Installer (recommended)
 
-Build the installer from Linux/macOS: `installer/build.sh` → `installer/dist/vlmp-setup-<version>-win-x64.exe` (needs `apt install nsis`). It bundles the compiled server, web client, a portable Node.js runtime, production `node_modules` with win32 native bindings, and NSSM — FFmpeg is NOT bundled (the installer offers a winget install; VLMP warns at boot while it's missing).
+Download `vlmp-setup-<version>-win-x64.exe` from
+<https://github.com/kosm1x/vlmp/releases> (v0.1.0 published 2026-07-20;
+SmartScreen warns on unsigned installers — "More info → Run anyway").
+Or build it from Linux/macOS: `installer/build.sh` → `installer/dist/vlmp-setup-<version>-win-x64.exe` (needs `apt install nsis`). It bundles the compiled server, web client, a portable Node.js runtime, production `node_modules` with win32 native bindings, and NSSM — FFmpeg is NOT bundled (the installer offers a winget install; VLMP warns at boot while it's missing).
 
 What the installed app does differently from a manual setup:
 
