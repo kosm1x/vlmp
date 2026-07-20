@@ -8,7 +8,7 @@ this checklist passes on real hardware).
 ## Installer (recommended)
 
 Download `vlmp-setup-<version>-win-x64.exe` from
-<https://github.com/kosm1x/vlmp/releases> (v0.1.1 published 2026-07-20;
+<https://github.com/kosm1x/vlmp/releases> (v0.1.3 published 2026-07-20;
 SmartScreen warns on unsigned installers — "More info → Run anyway").
 v0.1.0 had a launcher ACL bug that left `jwt.secret` with an empty DACL on
 the second start (EPERM at boot) — upgrade, or repair in place with
@@ -122,7 +122,9 @@ VLMP_TMDB_API_KEY=<your key>
 ```
 
 Restart VLMP. New scans match automatically; for media added before the key
-existed, use the metadata rescan in Settings (or re-scan the folder).
+existed, use Settings → **"Fetch metadata for library"** — it re-reads titles
+from filenames with the current parser and matches in the background with a
+progress counter (~5 min per 1,000 titles, TMDb rate-limited).
 Media TMDb can't match (personal recordings) get a frame-grab thumbnail
 generated on first view instead.
 
