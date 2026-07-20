@@ -222,3 +222,11 @@ html,body{background:var(--bg);color:var(--text);font-family:system-ui,-apple-sy
   .playlist-media-poster{display:none}
   .playlist-media-pos{width:18px}
 }
+.category-header{display:flex;align-items:baseline;gap:.75rem;margin-bottom:1.25rem}
+.category-title{font-size:1.5rem;font-weight:600}
+.category-count{color:#888;font-size:.9rem}
+.category-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(160px,1fr));gap:1rem .75rem}
+.category-grid .media-card{width:auto}
+.category-grid .media-card-poster{width:100%;height:auto;aspect-ratio:2/3}
+.category-more{display:flex;justify-content:center;margin:1.5rem 0}
+@media (max-width:768px){.category-grid{grid-template-columns:repeat(auto-fill,minmax(120px,1fr))}}

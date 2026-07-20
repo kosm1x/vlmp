@@ -11,7 +11,12 @@ export function isLoggedIn() {
   return !!token;
 }
 export async function api(path, options = {}) {
-  const headers = { "Content-Type": "application/json", ...options.headers };
+  // Content-Type only when a body is actually sent: Fastify 400s a bodyless
+  // request (every DELETE here) that claims application/json.
+  const headers = {
+    ...(options.body !== undefined && { "Content-Type": "application/json" }),
+    ...options.headers,
+  };
   if (token) headers["Authorization"] = `Bearer ${token}`;
   const res = await fetch(path, { ...options, headers });
   if (res.status === 401) {

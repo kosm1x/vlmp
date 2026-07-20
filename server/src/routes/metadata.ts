@@ -10,10 +10,17 @@ import {
 } from "../metadata/matcher.js";
 import { parseIntParam } from "./params.js";
 import { getOrCreateThumb } from "../metadata/thumbs.js";
+import { classifyByFolder, type MediaCategory } from "../scanner/classify.js";
 import { isMediaFolderVisible } from "../media/library.js";
 import { createReadStream } from "node:fs";
 
-let metadataScanInProgress = false;
+let metadataScanState = {
+  inProgress: false,
+  total: 0,
+  done: 0,
+  matched: 0,
+  failed: 0,
+};
 
 export function registerMetadataRoutes(
   app: FastifyInstance,
@@ -94,36 +101,91 @@ export function registerMetadataRoutes(
     async (request, reply) => {
       if (!config.tmdbApiKey)
         return reply.code(503).send({ error: "TMDb API key not configured" });
-      if (metadataScanInProgress)
+      if (metadataScanState.inProgress)
         return reply
           .code(409)
           .send({ error: "Metadata scan already in progress" });
-      metadataScanInProgress = true;
-      try {
-        const { folder_id } = request.body || {};
-        const condition = folder_id ? "WHERE library_folder_id = ?" : "";
-        const params = folder_id ? [folder_id] : [];
-        const items = db
-          .prepare(`SELECT id FROM media_items ${condition}`)
-          .all(...params) as { id: number }[];
-        let matched = 0;
-        let failed = 0;
-        for (const item of items) {
-          try {
-            const result = await matchAndApplyMetadata(db, item.id, config);
-            if (result) matched++;
-            // Throttle: 300ms between requests (respects TMDb ~40 req/10s limit)
-            await new Promise((r) => setTimeout(r, 300));
-          } catch {
-            failed++;
-          }
-        }
-        return { total: items.length, matched, failed };
-      } finally {
-        metadataScanInProgress = false;
-      }
+      const { folder_id } = request.body || {};
+      const condition = folder_id ? "WHERE m.library_folder_id = ?" : "";
+      const params = folder_id ? [folder_id] : [];
+      const items = db
+        .prepare(
+          `SELECT m.id, m.file_path, m.poster_path, f.path AS folder_path, f.category
+           FROM media_items m JOIN library_folders f ON f.id = m.library_folder_id ${condition}`,
+        )
+        .all(...params) as {
+        id: number;
+        file_path: string;
+        poster_path: string | null;
+        folder_path: string;
+        category: string;
+      }[];
+      metadataScanState = {
+        inProgress: true,
+        total: items.length,
+        done: 0,
+        matched: 0,
+        failed: 0,
+      };
+      // Fire-and-forget with status polling: at 300ms/item (TMDb ~40 req/10s)
+      // a few thousand items take many minutes — holding the request open
+      // meant proxy idle-timeouts killed the response mid-scan.
+      runMetadataBackfill(items).catch((err) =>
+        request.log.error({ err }, "metadata backfill crashed"),
+      );
+      return reply.code(202).send({ total: items.length, status: "running" });
     },
   );
+
+  app.get(
+    "/admin/metadata/scan/status",
+    { preHandler: [auth, adminOnly] },
+    async () => metadataScanState,
+  );
+
+  async function runMetadataBackfill(
+    items: {
+      id: number;
+      file_path: string;
+      poster_path: string | null;
+      folder_path: string;
+      category: string;
+    }[],
+  ) {
+    try {
+      for (const item of items) {
+        try {
+          // Unmatched items get re-classified from the file path first: rows
+          // scanned by older classifier versions carry release-junk titles
+          // ("300" stored as "720P BRRIP XVID…") that TMDb can never match.
+          // Matched items are left alone — their titles came from TMDb.
+          if (!item.poster_path) {
+            const c = classifyByFolder(
+              item.file_path,
+              item.folder_path,
+              item.category as MediaCategory,
+            );
+            const sortTitle = c.title
+              .replace(/^(?:the|a|an)\s+/i, "")
+              .toLowerCase();
+            db.prepare(
+              "UPDATE media_items SET title = ?, sort_title = ?, year = ? WHERE id = ?",
+            ).run(c.title, sortTitle, c.year, item.id);
+          }
+          const result = await matchAndApplyMetadata(db, item.id, config);
+          if (result) metadataScanState.matched++;
+          // Throttle: 300ms between requests (respects TMDb ~40 req/10s limit)
+          await new Promise((r) => setTimeout(r, 300));
+        } catch {
+          metadataScanState.failed++;
+        } finally {
+          metadataScanState.done++;
+        }
+      }
+    } finally {
+      metadataScanState.inProgress = false;
+    }
+  }
 
   app.post<{ Params: { showId: string } }>(
     "/admin/metadata/tv/:showId/match",

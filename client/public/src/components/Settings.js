@@ -32,7 +32,10 @@ export function Settings() {
   const [userPending, setUserPending] = useState(false);
   const [busyUser, setBusyUser] = useState(null);
   const pollTimer = useRef(null);
+  const metaTimer = useRef(null);
   const mountedRef = useRef(true);
+  const [metaScan, setMetaScan] = useState(null);
+  const [metaError, setMetaError] = useState("");
   const selfId = getUserId();
 
   // Every setState below an await must check mountedRef — a resolve after
@@ -67,11 +70,38 @@ export function Settings() {
     mountedRef.current = true;
     load();
     loadUsers();
+    loadMetaStatus(); // a backfill may already be running from a prior visit
     return () => {
       mountedRef.current = false;
       clearTimeout(pollTimer.current);
+      clearTimeout(metaTimer.current);
     };
   }, []);
+
+  async function loadMetaStatus() {
+    try {
+      const s = await get("/admin/metadata/scan/status");
+      if (!mountedRef.current) return;
+      setMetaScan(s);
+      if (s.inProgress) {
+        clearTimeout(metaTimer.current);
+        metaTimer.current = setTimeout(loadMetaStatus, 2000);
+      }
+    } catch {
+      /* status is best-effort */
+    }
+  }
+
+  async function fetchMetadata() {
+    setMetaError("");
+    try {
+      await post("/admin/metadata/scan", {});
+      await loadMetaStatus();
+    } catch (err) {
+      if (mountedRef.current)
+        setMetaError(err.message || "Failed to start metadata fetch");
+    }
+  }
 
   async function addUser(e) {
     e.preventDefault();
@@ -328,6 +358,39 @@ export function Settings() {
           always see everything. "Searchable" only affects whether a visible
           library shows up in search results.
         </p>`
+      }
+      ${
+        folders !== null &&
+        folders.length > 0 &&
+        html`<div class="settings-meta-scan">
+            <button
+              class="lum-btn"
+              onClick=${fetchMetadata}
+              disabled=${metaScan?.inProgress}
+            >
+              ${
+              metaScan?.inProgress
+                ? `Fetching metadata… ${metaScan.done}/${metaScan.total}`
+                : "Fetch metadata for library"
+            }
+            </button>
+            ${
+            metaScan &&
+            !metaScan.inProgress &&
+            metaScan.total > 0 &&
+            html`<span class="settings-note inline">
+              Last run: ${metaScan.matched} matched of ${metaScan.total}
+              ${metaScan.failed > 0 ? ` (${metaScan.failed} errors)` : ""}
+            </span>`
+          }
+            ${metaError && html`<span class="settings-error">${metaError}</span>`}
+          </div>
+          <p class="settings-note">
+            Looks up posters and descriptions on TMDb for everything in the
+            library — run it after setting the TMDb API key. Items without a
+            match are re-read from their filenames first, so titles cleaned up
+            in newer versions get fixed here too.
+          </p>`
       }
     </section>
 
