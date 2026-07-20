@@ -7,6 +7,7 @@ import { existsSync, mkdirSync, rmSync } from "node:fs";
 import { execFile } from "node:child_process";
 import { loadConfig } from "./config.js";
 import { parseFfmpegCaps, primeFfmpegCaps } from "./streaming/ffmpeg-caps.js";
+import { initHwEncoder } from "./streaming/hw-encoders.js";
 import { getDatabase, closeDatabase } from "./db/index.js";
 import { initSchema } from "./db/schema.js";
 import { resetInterruptedScans } from "./media/library.js";
@@ -72,6 +73,12 @@ for (const [name, bin] of [
     if (name === "ffmpeg") primeFfmpegCaps(bin, parseFfmpegCaps(stdout));
   });
 }
+
+// Probe hardware encoders (VLMP_HW_TRANSCODE) off the boot path; transcodes
+// started before the probe finishes use software x264 for that one job.
+initHwEncoder(config).catch((err) =>
+  console.warn("[transcode] hardware encoder probe failed:", err),
+);
 
 config.serverFingerprint = loadOrGenerateFingerprint(config.dataDir);
 

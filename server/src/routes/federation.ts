@@ -17,6 +17,7 @@ import {
   proxyStreamStart,
   proxyStreamContent,
   proxyStreamStop,
+  proxyStreamKeepalive,
   getFedStreamSession,
   cleanupFedStreamSession,
 } from "../federation/proxy.js";
@@ -327,6 +328,29 @@ export function registerFederationRoutes(
       } catch {
         return reply.code(502).send({ error: "Stream unavailable" });
       }
+    },
+  );
+
+  // Keepalive for remote playback (paused viewers generate no HLS traffic)
+  app.post<{ Params: { serverId: string; sessionId: string } }>(
+    "/federation/servers/:serverId/stream/:sessionId/keepalive",
+    { preHandler: auth },
+    async (request, reply) => {
+      const session = getFedStreamSession(request.params.sessionId);
+      if (!session)
+        return reply.code(404).send({ error: "Stream session not found" });
+      if (session.userId !== request.user!.sub)
+        return reply.code(404).send({ error: "Stream session not found" });
+      try {
+        await proxyStreamKeepalive(
+          session.server,
+          config,
+          session.remoteSessionId,
+        );
+      } catch {
+        // Best-effort — the next segment fetch revives things anyway
+      }
+      return reply.code(204).send();
     },
   );
 

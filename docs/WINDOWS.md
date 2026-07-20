@@ -110,6 +110,24 @@ can't be handed to strangers** — sharing with people outside the household
 needs the public-exposure track (port forward + domain + TLS), which stays
 deferred until after the smoke checklist and hardware transcoding work.
 
+## Hardware transcoding (v0.1.5+)
+
+Off by default (software x264 works everywhere). To use the GPU for both
+decode and encode, add to `C:\ProgramData\vlmp\vlmp.env` as Administrator:
+
+```
+VLMP_HW_TRANSCODE=auto
+```
+
+and restart VLMP. `auto` probes NVENC (NVIDIA) → QSV (Intel) → AMF (AMD) at
+boot with a real test encode and uses the first that works; the boot log
+prints either `[transcode] hardware encoder: h264_nvenc` or a warning that
+it fell back to software. A specific value (`nvenc`, `qsv`, `amf`) forces
+that probe only. Needs current GPU drivers; ffmpeg from winget
+(`Gyan.FFmpeg`) already includes all three encoders. With hardware enabled,
+a 4K-source transcode drops from ~40% CPU to single digits — the encode
+moves to the GPU's dedicated media block, not the 3D cores.
+
 ## Metadata / posters (TMDb)
 
 Poster fetching is OFF until a TMDb API key is configured — the boot log says

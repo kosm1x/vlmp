@@ -24,6 +24,7 @@ import {
   type StreamSession,
 } from "../src/streaming/session.js";
 import { getAvailableProfiles } from "../src/streaming/adaptive.js";
+import { primeHwEncoder } from "../src/streaming/hw-encoders.js";
 
 // Spawning this fails with ENOENT — the job dies almost immediately.
 const DEAD_FFMPEG = "/nonexistent/ffmpeg-for-args-test";
@@ -47,6 +48,7 @@ beforeEach(() => {
 afterEach(() => {
   destroyAllSessions();
   resetFfmpegCapsCache();
+  primeHwEncoder(null);
   rmSync(tmp, { recursive: true, force: true });
 });
 
@@ -118,10 +120,37 @@ describe("startTranscode pacing args", () => {
     const i = args.indexOf("-start_number");
     expect(args[i + 1]).toBe("0");
   });
+
+  it("forces keyframes on the segment grid (synthetic playlist alignment)", () => {
+    const args = argsOf(startTranscode("/in.mkv", "s6", profile, cfgDead));
+    const i = args.indexOf("-force_key_frames");
+    expect(args[i + 1]).toBe("expr:gte(t,n_forced*6)");
+  });
+
+  it("uses the probed hardware encoder with GPU decode, no x264 flags", () => {
+    primeHwEncoder("h264_nvenc");
+    const args = argsOf(startTranscode("/in.mkv", "s7", profile, cfgDead));
+    expect(args).toContain("h264_nvenc");
+    expect(args).not.toContain("libx264");
+    expect(args).not.toContain("-tune"); // x264-only flag would error on nvenc
+    // -hwaccel is an input option — must precede -i
+    expect(args.indexOf("-hwaccel")).toBeGreaterThan(-1);
+    expect(args.indexOf("-hwaccel")).toBeLessThan(args.indexOf("-i"));
+    // shared flags survive
+    expect(args).toContain("-force_key_frames");
+    expect(args).toContain("-readrate");
+  });
+
+  it("stays on software x264 when no hardware encoder is selected", () => {
+    const args = argsOf(startTranscode("/in.mkv", "s8", profile, cfgDead));
+    expect(args).toContain("libx264");
+    expect(args).toContain("-tune");
+    expect(args).not.toContain("-hwaccel");
+  });
 });
 
 describe.skipIf(process.platform === "win32")("ensureSegmentReady", () => {
-  function makeSession(startTime?: number): StreamSession {
+  function makeSession(): StreamSession {
     const s = createSession(
       cfgAlive,
       1,
@@ -129,11 +158,25 @@ describe.skipIf(process.platform === "win32")("ensureSegmentReady", () => {
       "1",
       getAvailableProfiles(1280, 720),
       false,
-      startTime ? { startTime } : undefined,
+      undefined,
+      7200,
     );
     expect(s).not.toBeNull();
     return s!;
   }
+
+  it("spawns the encoder at the requested position on first demand", async () => {
+    // No job exists yet (playlists are synthetic and never start ffmpeg) —
+    // the first segment request creates the job right at the resume point.
+    const session = makeSession();
+    await expect(
+      ensureSegmentReady(session, "720p", "segment_0050.ts", cfgDead),
+    ).rejects.toThrow();
+    const job = session.jobs.get("720p")!;
+    expect(job.startNumber).toBe(50);
+    const args = job.process.spawnargs;
+    expect(args[args.indexOf("-ss") + 1]).toBe(String(50 * SEGMENT_SECONDS));
+  });
 
   it("serves a segment that is already on disk without touching the job", async () => {
     const session = makeSession();
@@ -169,14 +212,14 @@ describe.skipIf(process.platform === "win32")("ensureSegmentReady", () => {
   });
 
   it("restarts the encoder at the requested position on a far-forward seek", async () => {
-    const session = makeSession(300); // resumed session: base offset composes
+    const session = makeSession();
     const old = startProfileTranscode(session, "720p", cfgAlive)!;
     // Age the job past the freshness grace so the restart logic engages
     old.startedAt -= 60_000;
     writeFileSync(join(old.outputDir, "segment_0000.ts"), "TS");
     // Segment 100 is far beyond frontier 0 → kill + respawn at the position.
     // The respawn uses the dead binary so the wait rejects fast — the restart
-    // itself is what's asserted.
+    // itself is what's asserted. Timeline is absolute: -ss is n * 6 exactly.
     await expect(
       ensureSegmentReady(session, "720p", "segment_0100.ts", cfgDead),
     ).rejects.toThrow();
@@ -184,9 +227,7 @@ describe.skipIf(process.platform === "win32")("ensureSegmentReady", () => {
     expect(fresh).not.toBe(old);
     expect(fresh.startNumber).toBe(100);
     const args = fresh.process.spawnargs;
-    expect(args[args.indexOf("-ss") + 1]).toBe(
-      String(300 + 100 * SEGMENT_SECONDS),
-    );
+    expect(args[args.indexOf("-ss") + 1]).toBe(String(100 * SEGMENT_SECONDS));
     expect(args[args.indexOf("-start_number") + 1]).toBe("100");
   });
 
@@ -200,6 +241,34 @@ describe.skipIf(process.platform === "win32")("ensureSegmentReady", () => {
       ensureSegmentReady(session, "720p", "segment_0010.ts", cfgDead),
     ).rejects.toThrow();
     expect(session.jobs.get("720p")!.startNumber).toBe(10);
+  });
+
+  it("rejects segments beyond the playlist's own end without spawning", async () => {
+    // Session duration 60 → playlist lists segments 0..9. A request for 10+
+    // (stale playlist or probe) must reject instantly with NO ffmpeg spawn —
+    // first-demand spawns past EOF burned two throwaway runs per retry.
+    const session = makeSession(); // duration 7200 → max index 1197
+    await expect(
+      ensureSegmentReady(session, "720p", "segment_1198.ts", cfgDead),
+    ).rejects.toThrow("past end of stream");
+    expect(session.jobs.size).toBe(0); // nothing spawned
+  });
+
+  it("fails fast past EOF after a clean encoder exit (no restart churn)", async () => {
+    const session = makeSession();
+    const job = startProfileTranscode(session, "720p", cfgAlive)!;
+    job.startedAt -= 60_000;
+    job.exited = true;
+    job.exitCode = 0; // encoder ran to the real end of stream
+    writeFileSync(join(job.outputDir, "segment_0004.ts"), "TS");
+    // Segment 6 is beyond everything the finished encoder produced — a
+    // restart would seek past EOF and produce nothing, so reject instantly.
+    const before = Date.now();
+    await expect(
+      ensureSegmentReady(session, "720p", "segment_0006.ts", cfgDead),
+    ).rejects.toThrow("past end of stream");
+    expect(Date.now() - before).toBeLessThan(1000); // no wait, no respawn
+    expect(session.jobs.get("720p")).toBe(job);
   });
 
   it("restarts a dead job even for a segment in its own range", async () => {

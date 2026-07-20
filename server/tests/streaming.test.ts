@@ -3,6 +3,7 @@ import { canDirectPlay } from "../src/streaming/direct.js";
 import {
   getAvailableProfiles,
   generateMasterPlaylist,
+  generateVariantPlaylist,
 } from "../src/streaming/adaptive.js";
 
 describe("direct play", () => {
@@ -50,6 +51,41 @@ describe("adaptive profiles", () => {
     expect(getAvailableProfiles(null, null).every((p) => p.height <= 720)).toBe(
       true,
     );
+  });
+});
+
+describe("variant playlist (synthesized VOD)", () => {
+  it("lists the full timeline with a short last segment and VOD markers", () => {
+    const pl = generateVariantPlaylist(20, 6); // 6+6+6+2
+    expect(pl).toContain("#EXT-X-PLAYLIST-TYPE:VOD");
+    expect(pl.trimEnd().endsWith("#EXT-X-ENDLIST")).toBe(true);
+    expect((pl.match(/#EXTINF/g) || []).length).toBe(4);
+    expect(pl).toContain("segment_0000.ts");
+    expect(pl).toContain("segment_0003.ts");
+    expect(pl).not.toContain("segment_0004.ts");
+    expect(pl).toContain("#EXTINF:2.000000,");
+  });
+
+  it("handles durations that divide evenly", () => {
+    const pl = generateVariantPlaylist(12, 6);
+    expect((pl.match(/#EXTINF/g) || []).length).toBe(2);
+    expect(pl).not.toContain("#EXTINF:0");
+  });
+
+  it("emits at least one segment for sub-segment media", () => {
+    const pl = generateVariantPlaylist(0.5, 6);
+    expect(pl).toContain("segment_0000.ts");
+    expect(pl).toContain("#EXTINF:0.500000,");
+  });
+
+  it("never advertises tail segments keyframe drift can erase (2h NTSC)", () => {
+    // 23.976fps segments really run 6.006s, so a 7200s file yields ~1198-1199
+    // real segments — a naive ceil(7200/6)=1200 listing would 404 fatally at
+    // the end of every long NTSC-rate file.
+    const pl = generateVariantPlaylist(7200, 6);
+    const count = (pl.match(/#EXTINF/g) || []).length;
+    expect(count).toBeLessThanOrEqual(1198);
+    expect(count).toBeGreaterThanOrEqual(1195); // but not over-truncated
   });
 });
 

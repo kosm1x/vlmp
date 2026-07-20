@@ -179,3 +179,18 @@ export async function proxyStreamStop(
     `/federation/api/stream/${remoteSessionId}`,
   );
 }
+
+// Keeps the peer's session out of its idle sweep during a long pause — VOD
+// playlists are fetched once, so a paused viewer generates no traffic.
+export async function proxyStreamKeepalive(
+  server: FederatedServer,
+  config: Config,
+  remoteSessionId: string,
+): Promise<void> {
+  await federatedFetch(
+    server,
+    config,
+    "POST",
+    `/federation/api/stream/${remoteSessionId}/keepalive`,
+  );
+}

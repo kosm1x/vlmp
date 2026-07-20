@@ -3,7 +3,7 @@ import { statfs } from "node:fs/promises";
 import { join } from "node:path";
 import { randomBytes } from "node:crypto";
 import type { Config } from "../config.js";
-import type { TranscodeProfile } from "./adaptive.js";
+import { maxSegmentIndex, type TranscodeProfile } from "./adaptive.js";
 import {
   startTranscode,
   waitForSegment,
@@ -11,8 +11,11 @@ import {
   type TranscodeJob,
 } from "./transcoder.js";
 
+// The stream timeline is ALWAYS absolute media time (the variant playlist is
+// synthesized from the full duration) — there is no per-session start offset.
+// Resume is a client-side seek; the segment route spawns the encoder at
+// whatever position is actually requested first.
 export interface TranscodeOptions {
-  startTime?: number;
   audioTrack?: number;
 }
 
@@ -26,6 +29,8 @@ export interface StreamSession {
   createdAt: number;
   lastAccessed: number;
   directPlay: boolean;
+  /** Probed media duration (seconds); null falls back to the legacy live playlist. */
+  duration: number | null;
   transcodeOptions?: TranscodeOptions;
 }
 
@@ -78,6 +83,7 @@ export function createSession(
   profiles: TranscodeProfile[],
   directPlay: boolean,
   transcodeOptions?: TranscodeOptions,
+  duration?: number | null,
 ): StreamSession | null {
   if (!directPlay && transcodeSessionCount() >= config.maxTranscodeSessions)
     return null;
@@ -93,6 +99,7 @@ export function createSession(
     createdAt: Date.now(),
     lastAccessed: Date.now(),
     directPlay,
+    duration: duration ?? null,
     transcodeOptions,
   };
   sessions.set(id, session);
@@ -116,16 +123,15 @@ export function startProfileTranscode(
   if (!profile) return null;
   const existing = session.jobs.get(profileName);
   if (existing && !existing.process.killed) existing.process.kill("SIGTERM");
-  // Seek restart: segment numbers are absolute on the session's timeline
-  // (which itself starts at the resume offset), so the ffmpeg input seek
-  // composes the session's startTime with the segment offset, and
-  // -start_number keeps the new playlist aligned with what hls.js expects.
+  // Segment numbers ARE absolute media time (n * SEGMENT_SECONDS): the
+  // synthesized VOD playlist has no offset, so the ffmpeg input seek and
+  // -start_number derive directly from the segment number.
   const base = session.transcodeOptions ?? {};
   const opts =
     atSegment !== undefined && atSegment > 0
       ? {
           ...base,
-          startTime: (base.startTime ?? 0) + atSegment * SEGMENT_SECONDS,
+          startTime: atSegment * SEGMENT_SECONDS,
           startNumber: atSegment,
         }
       : base;
@@ -172,15 +178,39 @@ export async function ensureSegmentReady(
   config: Config,
   waitMs: number = SEGMENT_WAIT_MS,
 ): Promise<string> {
-  let job = session.jobs.get(profileName);
-  if (!job) throw new Error("Profile not started");
-  job.lastAccessed = Date.now();
-  const segmentPath = join(job.outputDir, segmentName);
-  if (existsSync(segmentPath)) return segmentPath;
   const m = SEGMENT_NUMBER.exec(segmentName);
   if (!m) throw new Error("Invalid segment name");
   const n = parseInt(m[1], 10);
+  // Reject anything beyond the synthesized playlist's own end BEFORE any
+  // spawn/restart branch — the playlist math already knows where the real
+  // stream can end, and a first-demand spawn past EOF would otherwise burn
+  // two throwaway ffmpeg runs per player retry (R2 2026-07-20).
+  if (
+    session.duration &&
+    session.duration > 0 &&
+    n > maxSegmentIndex(session.duration, SEGMENT_SECONDS)
+  )
+    throw new Error("Segment past end of stream");
+  let job = session.jobs.get(profileName);
+  if (!job) {
+    // First demand for this profile — spawn the encoder AT the requested
+    // position. Resume needs no server-side start offset: the client seeks,
+    // and the first segment it asks for is where encoding begins.
+    job = startProfileTranscode(session, profileName, config, n) ?? undefined;
+    if (!job) throw new Error("Profile not found");
+  }
+  job.lastAccessed = Date.now();
+  const segmentPath = join(job.outputDir, segmentName);
+  if (existsSync(segmentPath)) return segmentPath;
   const frontier = encodeFrontier(job.outputDir);
+  // Clean-EOF guard: an encoder that exited 0 ran to the end of the real
+  // stream, so a request beyond its frontier is a segment that cannot exist
+  // (playlist tail on a duration-overstated file). Restarting would seek
+  // past EOF and produce nothing — fail fast instead of churning a
+  // throwaway ffmpeg per player retry. Rewinds (n < startNumber) still
+  // restart normally below.
+  if (job.exited && job.exitCode === 0 && n > frontier && n >= job.startNumber)
+    throw new Error("Segment past end of stream");
   // A job started moments ago hasn't written anything yet — give it the
   // benefit of the doubt for segments near its start instead of thrashing
   // kill/respawn when concurrent requests race a fresh restart.

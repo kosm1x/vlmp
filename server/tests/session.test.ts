@@ -36,11 +36,18 @@ describe("stream sessions", () => {
     expect(s!.directPlay).toBe(true);
   });
   it("stores transcode options for lazy profile starts", () => {
-    const s = createSession(config, 1, "/t.mp4", "1", [], false, {
-      startTime: 300,
-      audioTrack: 1,
-    });
-    expect(s!.transcodeOptions).toEqual({ startTime: 300, audioTrack: 1 });
+    const s = createSession(
+      config,
+      1,
+      "/t.mp4",
+      "1",
+      [],
+      false,
+      { audioTrack: 1 },
+      5400,
+    );
+    expect(s!.transcodeOptions).toEqual({ audioTrack: 1 });
+    expect(s!.duration).toBe(5400);
   });
   it("caps concurrent transcode sessions but not direct play", () => {
     for (let i = 0; i < config.maxTranscodeSessions; i++) {

@@ -11,6 +11,7 @@ import { isMediaFolderVisible } from "../media/library.js";
 import {
   getAvailableProfiles,
   generateMasterPlaylist,
+  generateVariantPlaylist,
 } from "../streaming/adaptive.js";
 import {
   createSession,
@@ -21,7 +22,7 @@ import {
   getActiveSessions,
   hasEnoughDiskSpace,
 } from "../streaming/session.js";
-import { waitForPlaylist } from "../streaming/transcoder.js";
+import { waitForPlaylist, SEGMENT_SECONDS } from "../streaming/transcoder.js";
 import { parseIntParam, parseJsonColumn } from "./params.js";
 
 interface MediaRow {
@@ -97,6 +98,9 @@ export function registerPlaybackRoutes(
         return reply
           .code(507)
           .send({ error: "Insufficient disk space for transcoding" });
+      // start_time stays in the accepted schema for stale cached clients but
+      // is ignored: the stream timeline is absolute (synthesized VOD
+      // playlist), so resume is a client-side seek, not a server offset.
       const session = createSession(
         config,
         mediaId,
@@ -104,10 +108,8 @@ export function registerPlaybackRoutes(
         request.user!.sub,
         profiles,
         direct,
-        {
-          startTime: request.body.start_time,
-          audioTrack: request.body.audio_track,
-        },
+        { audioTrack: request.body.audio_track },
+        media.duration,
       );
       if (!session)
         return reply
@@ -159,6 +161,8 @@ export function registerPlaybackRoutes(
         "guest",
         profiles,
         direct,
+        undefined,
+        media.duration,
       );
       if (!session)
         return reply
@@ -175,7 +179,24 @@ export function registerPlaybackRoutes(
         mode: "transcode",
         url: `/stream/${session.id}/master.m3u8`,
         profiles: profiles.map((p) => p.name),
+        duration: media.duration,
       });
+    },
+  );
+
+  // Touch a session so the 10-minute idle sweep spares it. VOD playlists are
+  // fetched once and a paused player requests nothing, so without this ping
+  // a >10-min pause would destroy the session out from under the viewer.
+  // Capability model matches the other /stream/:sessionId routes (the
+  // unguessable session id IS the credential).
+  app.post<{ Params: { sessionId: string } }>(
+    "/stream/:sessionId/keepalive",
+    async (request, reply) => {
+      if (!validateSessionId(request.params.sessionId))
+        return reply.code(400).send({ error: "Invalid session ID format" });
+      if (!getSession(request.params.sessionId))
+        return reply.code(404).send({ error: "Session not found" });
+      return reply.code(204).send();
     },
   );
 
@@ -199,6 +220,16 @@ export function registerPlaybackRoutes(
         return reply.code(400).send({ error: "Invalid session ID format" });
       const session = getSession(request.params.sessionId);
       if (!session) return reply.code(404).send({ error: "Session not found" });
+      if (!session.profiles.some((p) => p.name === request.params.profile))
+        return reply.code(404).send({ error: "Profile not found" });
+      // Synthesized VOD playlist: the player sees the TRUE duration and can
+      // seek anywhere; segments are encoded on demand by the segment route.
+      if (session.duration && session.duration > 0)
+        return reply
+          .header("Content-Type", "application/vnd.apple.mpegurl")
+          .send(generateVariantPlaylist(session.duration, SEGMENT_SECONDS));
+      // Legacy live path for media whose duration ffprobe couldn't read:
+      // serve ffmpeg's own growing playlist (no reliable seek past frontier).
       let job = session.jobs.get(request.params.profile);
       if (!job) {
         if (!(await hasEnoughDiskSpace(config)))
@@ -213,8 +244,7 @@ export function registerPlaybackRoutes(
           undefined;
         if (!job) return reply.code(404).send({ error: "Profile not found" });
       }
-      // hls.js polls the active level's playlist while streaming — this is
-      // the liveness signal that keeps the idle-job reaper away.
+      // Live-playlist polling is the liveness signal on this path.
       job.lastAccessed = Date.now();
       try {
         await waitForPlaylist(job);
@@ -234,19 +264,26 @@ export function registerPlaybackRoutes(
         return reply.code(400).send({ error: "Invalid session ID format" });
       const session = getSession(request.params.sessionId);
       if (!session) return reply.code(404).send({ error: "Session not found" });
-      const job = session.jobs.get(request.params.profile);
-      if (!job) return reply.code(404).send({ error: "Profile not found" });
+      if (!session.profiles.some((p) => p.name === request.params.profile))
+        return reply.code(404).send({ error: "Profile not found" });
       const SEGMENT_PATTERN = /^segment_\d{4}\.ts$/;
       if (!SEGMENT_PATTERN.test(request.params.segment)) {
         return reply.code(400).send({ error: "Invalid segment name" });
       }
-      const segmentPath = join(job.outputDir, request.params.segment);
-      if (!isPathInside(job.outputDir, segmentPath)) {
-        return reply.code(400).send({ error: "Invalid segment path" });
-      }
+      // First segment demand for a profile spawns its encoder — gate on disk
+      // space here, where the spawn actually happens (the playlist is now
+      // synthetic and never starts ffmpeg).
+      if (
+        !session.jobs.get(request.params.profile) &&
+        !(await hasEnoughDiskSpace(config))
+      )
+        return reply
+          .code(507)
+          .send({ error: "Insufficient disk space for transcoding" });
       // Paced encoders don't have the whole file ready — this waits for the
-      // encoder when the segment is imminent, or restarts ffmpeg at the
-      // requested position (far seek / dead job) and resolves to the path.
+      // encoder when the segment is imminent, or spawns/restarts ffmpeg at
+      // the requested position (first demand, far seek, dead job) and
+      // resolves to the path.
       let readyPath: string;
       try {
         readyPath = await ensureSegmentReady(
@@ -257,6 +294,14 @@ export function registerPlaybackRoutes(
         );
       } catch {
         return reply.code(404).send({ error: "Segment not available" });
+      }
+      const outputDir = join(
+        config.transcodeTmpDir,
+        session.id,
+        request.params.profile,
+      );
+      if (!isPathInside(outputDir, readyPath)) {
+        return reply.code(400).send({ error: "Invalid segment path" });
       }
       return reply
         .header("Content-Type", "video/mp2t")

@@ -18,11 +18,11 @@ export function Player({ mediaId, onClose, serverId, federated }) {
   const videoRef = useRef(null);
   const hlsRef = useRef(null);
   const progressTimer = useRef(null);
+  const keepaliveTimer = useRef(null);
   const lastUiUpdate = useRef(0);
-  // When the server transcodes from a resume point (-ss), the HLS timeline
-  // starts at 0 but represents media time startOffset. All saved/displayed
-  // positions must add this offset; seeking must subtract it.
-  const startOffsetRef = useRef(0);
+  // The stream timeline is absolute media time for BOTH direct play and HLS:
+  // the server synthesizes a full VOD playlist from the real duration, so
+  // resume is a plain seek and the bar needs no offset arithmetic.
   const sessionRef = useRef(null);
   const [media, setMedia] = useState(null);
   const [playing, setPlaying] = useState(false);
@@ -39,9 +39,6 @@ export function Player({ mediaId, onClose, serverId, federated }) {
 
   useEffect(() => {
     let cancelled = false;
-    // Reset on every (re)mount and media change — a stale offset from a
-    // previous transcode-resume would corrupt a direct-play title's progress.
-    startOffsetRef.current = 0;
     async function init() {
       try {
         let mediaData, progress;
@@ -61,9 +58,7 @@ export function Player({ mediaId, onClose, serverId, federated }) {
         const streamUrl = federated
           ? `/federation/servers/${serverId}/stream/${mediaId}/start`
           : `/stream/${mediaId}/start`;
-        const sd = await post(streamUrl, {
-          start_time: progress.position_seconds || 0,
-        });
+        const sd = await post(streamUrl, {});
         if (cancelled) return;
         sessionRef.current = sd;
         setAudioTracks(sd.audio_tracks || []);
@@ -84,15 +79,20 @@ export function Player({ mediaId, onClose, serverId, federated }) {
         }
         const video = videoRef.current;
         if (!video) return;
+        const resumeAt = progress.position_seconds || 0;
+        // currentTime set before the media is seekable is silently dropped
+        // by Safari (and racy elsewhere) — apply the resume seek once
+        // metadata is in for the non-hls.js paths.
+        const seekOnReady = () => {
+          if (resumeAt > 0 && Math.abs(video.currentTime - resumeAt) > 1)
+            video.currentTime = resumeAt;
+        };
         if (sd.mode === "direct") {
+          video.addEventListener("loadedmetadata", seekOnReady, {
+            once: true,
+          });
           video.src = sd.url;
-          if (progress.position_seconds > 0)
-            video.currentTime = progress.position_seconds;
         } else if (window.Hls && Hls.isSupported()) {
-          // The server already transcodes from the resume point (start_time),
-          // so the stream's own 0 IS the resume position — seeking here too
-          // would apply the offset twice.
-          startOffsetRef.current = progress.position_seconds || 0;
           const hls = new Hls({
             maxBufferLength: 30,
             maxMaxBufferLength: 60,
@@ -101,6 +101,9 @@ export function Player({ mediaId, onClose, serverId, federated }) {
           hls.attachMedia(video);
           hls.on(Hls.Events.MANIFEST_PARSED, () => {
             setLoading(false);
+            // Resume = seek on the absolute VOD timeline; the server spawns
+            // the encoder at whatever segment this lands on.
+            if (resumeAt > 0) video.currentTime = resumeAt;
             video.play().catch(() => {});
           });
           hls.on(Hls.Events.ERROR, (_, d) => {
@@ -108,8 +111,10 @@ export function Player({ mediaId, onClose, serverId, federated }) {
           });
           hlsRef.current = hls;
         } else if (video.canPlayType("application/vnd.apple.mpegurl")) {
-          // Native HLS (Safari): same double-seek hazard as above.
-          startOffsetRef.current = progress.position_seconds || 0;
+          // Native HLS (Safari): same absolute timeline.
+          video.addEventListener("loadedmetadata", seekOnReady, {
+            once: true,
+          });
           video.src = sd.url;
         }
         setLoading(false);
@@ -138,12 +143,11 @@ export function Player({ mediaId, onClose, serverId, federated }) {
     if (!sessionRef.current) return;
     const v = videoRef.current;
     if (!v || !(v.currentTime > 0)) return;
-    const off = startOffsetRef.current;
     put(
       `/progress/${mediaId}`,
       {
-        position_seconds: off + v.currentTime,
-        duration_seconds: off + (v.duration || 0),
+        position_seconds: v.currentTime,
+        duration_seconds: v.duration || 0,
       },
       fetchOptions,
     ).catch(() => {});
@@ -160,9 +164,23 @@ export function Player({ mediaId, onClose, serverId, federated }) {
   }
 
   useEffect(() => {
-    if (federated) return;
+    // VOD playlists are fetched once and a paused player requests nothing —
+    // ping the session so the idle sweep spares it (proxied to the remote
+    // server for federated playback).
+    keepaliveTimer.current = setInterval(() => {
+      const sd = sessionRef.current;
+      if (!sd) return;
+      const kaUrl = federated
+        ? `/federation/servers/${serverId}/stream/${sd.session_id}/keepalive`
+        : `/stream/${sd.session_id}/keepalive`;
+      post(kaUrl, {}).catch(() => {});
+    }, 240000);
+    if (federated) return () => clearInterval(keepaliveTimer.current);
     progressTimer.current = setInterval(() => saveProgress(), 10000);
-    return () => clearInterval(progressTimer.current);
+    return () => {
+      clearInterval(progressTimer.current);
+      clearInterval(keepaliveTimer.current);
+    };
   }, [mediaId, federated]);
 
   // Refresh/tab-close never runs unmount cleanup — flush progress and free the
@@ -192,13 +210,8 @@ export function Player({ mediaId, onClose, serverId, federated }) {
   }
   function seek(e) {
     const v = videoRef.current;
-    // The bar operates in absolute media time; the stream timeline starts at
-    // the resume offset, so clamp — rewinding past it needs a fresh session.
-    if (v)
-      v.currentTime = Math.max(
-        0,
-        parseFloat(e.target.value) - startOffsetRef.current,
-      );
+    // Bar and stream share the same absolute timeline — seek is direct.
+    if (v) v.currentTime = Math.max(0, parseFloat(e.target.value));
   }
   function changeVol(e) {
     const val = parseFloat(e.target.value);
@@ -263,10 +276,9 @@ export function Player({ mediaId, onClose, serverId, federated }) {
       onEnded=${() => {
         setPlaying(false);
         if (federated) return;
-        const total = startOffsetRef.current + duration;
         put("/progress/" + mediaId, {
-          position_seconds: total,
-          duration_seconds: total,
+          position_seconds: duration,
+          duration_seconds: duration,
         }).catch(() => {});
       }}
       onClick=${togglePlay}
@@ -295,9 +307,9 @@ export function Player({ mediaId, onClose, serverId, federated }) {
         class="player-seek"
         type="range"
         min="0"
-        max=${startOffsetRef.current + (duration || 0)}
+        max=${duration || 0}
         step="0.1"
-        value=${startOffsetRef.current + currentTime}
+        value=${currentTime}
         onInput=${seek}
         aria-label="Seek"
       />
@@ -334,10 +346,7 @@ export function Player({ mediaId, onClose, serverId, federated }) {
           aria-label="Volume"
           style=${{ width: "80px", accentColor: "#e50914" }}
         />
-        <span class="player-time"
-          >${fmt(startOffsetRef.current + currentTime)} /
-          ${fmt(startOffsetRef.current + duration)}</span
-        >
+        <span class="player-time">${fmt(currentTime)} / ${fmt(duration)}</span>
         <div class="player-spacer"></div>
         <select class="player-select" value=${speed} onChange=${changeSpeed}>
           <option value="0.5">0.5x</option>

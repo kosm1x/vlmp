@@ -31,6 +31,19 @@ describe("config validation", () => {
     expect(config.port).toBe(3000);
   });
 
+  it("invalid VLMP_HW_TRANSCODE throws", () => {
+    process.env.VLMP_HW_TRANSCODE = "cuda";
+    expect(() => loadConfig()).toThrow("Invalid VLMP_HW_TRANSCODE");
+  });
+
+  it("VLMP_HW_TRANSCODE accepts the known modes and defaults to off", () => {
+    expect(loadConfig().hwTranscode).toBe("off");
+    for (const mode of ["auto", "nvenc", "qsv", "amf", "videotoolbox"]) {
+      process.env.VLMP_HW_TRANSCODE = mode;
+      expect(loadConfig().hwTranscode).toBe(mode);
+    }
+  });
+
   it("invalid publicUrl throws", () => {
     process.env.VLMP_PUBLIC_URL = "not-a-url";
     expect(() => loadConfig()).toThrow("Invalid VLMP_PUBLIC_URL");

@@ -4,6 +4,7 @@ import { join } from "node:path";
 import type { Config } from "../config.js";
 import type { TranscodeProfile } from "./adaptive.js";
 import { getFfmpegCaps } from "./ffmpeg-caps.js";
+import { getHwEncoder } from "./hw-encoders.js";
 
 export const SEGMENT_SECONDS = 6;
 // 1.5x playback speed keeps the encoder comfortably ahead of the player
@@ -12,6 +13,16 @@ export const SEGMENT_SECONDS = 6;
 // unpaced so startup and near seeks stay instant.
 const READRATE = 1.5;
 const READRATE_BURST_SECONDS = 120;
+
+// Per-encoder speed/quality knobs. x264's -preset/-tune don't apply to
+// hardware encoders; each has its own vocabulary. Bitrate/profile/level/
+// keyframe flags are shared and stay outside this table.
+const HW_ENCODER_TUNING: Record<string, string[]> = {
+  h264_nvenc: ["-preset", "p4"],
+  h264_qsv: ["-preset", "veryfast"],
+  h264_amf: ["-quality", "speed"],
+  h264_videotoolbox: [],
+};
 
 export interface TranscodeJob {
   process: ChildProcess;
@@ -47,15 +58,26 @@ export function startTranscode(
     if (caps.readrateInitialBurst)
       args.push("-readrate_initial_burst", String(READRATE_BURST_SECONDS));
   }
+  const hw = getHwEncoder();
+  // GPU decode when a hardware encoder is active — "auto" is advisory:
+  // ffmpeg silently falls back to software decoding if hwaccel init fails,
+  // and decoded frames land in system memory so the scale/pad filter chain
+  // is unchanged. This is where the 4K-source CPU cost goes away.
+  if (hw) args.push("-hwaccel", "auto");
+  args.push("-i", inputPath);
+  if (hw) {
+    args.push("-c:v", hw, ...HW_ENCODER_TUNING[hw]);
+  } else {
+    args.push(
+      "-c:v",
+      "libx264",
+      "-preset",
+      config.transcodePreset,
+      "-tune",
+      "film",
+    );
+  }
   args.push(
-    "-i",
-    inputPath,
-    "-c:v",
-    "libx264",
-    "-preset",
-    config.transcodePreset,
-    "-tune",
-    "film",
     "-profile:v",
     "high",
     "-level",
@@ -68,6 +90,12 @@ export function startTranscode(
     profile.bufSize,
     "-pix_fmt",
     "yuv420p",
+    // Force keyframes on exact SEGMENT_SECONDS multiples so the hls muxer
+    // cuts segments precisely where the synthesized VOD playlist says they
+    // are — without this, cuts drift to the nearest natural keyframe and the
+    // player's timeline mapping goes subtly wrong after seeks.
+    "-force_key_frames",
+    `expr:gte(t,n_forced*${SEGMENT_SECONDS})`,
     `-vf`,
     `scale=${profile.width}:${profile.height}:force_original_aspect_ratio=decrease,pad=${profile.width}:${profile.height}:(ow-iw)/2:(oh-ih)/2`,
     "-c:a",

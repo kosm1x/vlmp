@@ -16,6 +16,7 @@ import { canDirectPlay, serveDirectFile } from "../streaming/direct.js";
 import {
   getAvailableProfiles,
   generateMasterPlaylist,
+  generateVariantPlaylist,
 } from "../streaming/adaptive.js";
 import {
   createSession,
@@ -25,7 +26,7 @@ import {
   destroySession,
   hasEnoughDiskSpace,
 } from "../streaming/session.js";
-import { waitForPlaylist } from "../streaming/transcoder.js";
+import { waitForPlaylist, SEGMENT_SECONDS } from "../streaming/transcoder.js";
 import { parseIntParam, parseJsonColumn } from "./params.js";
 
 export function registerFederationApiRoutes(
@@ -168,6 +169,8 @@ export function registerFederationApiRoutes(
         return reply
           .code(507)
           .send({ error: "Insufficient disk space for transcoding" });
+      // start_time accepted for wire compat but ignored — the timeline is
+      // absolute (synthesized VOD playlist); resume is a client-side seek.
       const session = createSession(
         config,
         mediaId,
@@ -175,10 +178,8 @@ export function registerFederationApiRoutes(
         "federation",
         profiles,
         direct,
-        {
-          startTime: request.body?.start_time,
-          audioTrack: request.body?.audio_track,
-        },
+        { audioTrack: request.body?.audio_track },
+        media.duration,
       );
       if (!session)
         return reply
@@ -225,6 +226,14 @@ export function registerFederationApiRoutes(
     async (request, reply) => {
       const session = getSession(request.params.sessionId);
       if (!session) return reply.code(404).send({ error: "Session not found" });
+      if (!session.profiles.some((p) => p.name === request.params.profile))
+        return reply.code(404).send({ error: "Profile not found" });
+      // Synthesized VOD playlist — same contract as playback.ts.
+      if (session.duration && session.duration > 0)
+        return reply
+          .header("Content-Type", "application/vnd.apple.mpegurl")
+          .send(generateVariantPlaylist(session.duration, SEGMENT_SECONDS));
+      // Legacy live path for media without a probed duration.
       let job = session.jobs.get(request.params.profile);
       if (!job) {
         if (!(await hasEnoughDiskSpace(config)))
@@ -239,8 +248,7 @@ export function registerFederationApiRoutes(
           undefined;
         if (!job) return reply.code(404).send({ error: "Profile not found" });
       }
-      // Peer players poll the active level's playlist — liveness signal that
-      // keeps the idle-job reaper away.
+      // Live-playlist polling is the liveness signal on this path.
       job.lastAccessed = Date.now();
       try {
         await waitForPlaylist(job);
@@ -262,18 +270,23 @@ export function registerFederationApiRoutes(
     async (request, reply) => {
       const session = getSession(request.params.sessionId);
       if (!session) return reply.code(404).send({ error: "Session not found" });
-      const job = session.jobs.get(request.params.profile);
-      if (!job) return reply.code(404).send({ error: "Profile not found" });
+      if (!session.profiles.some((p) => p.name === request.params.profile))
+        return reply.code(404).send({ error: "Profile not found" });
       const SEGMENT_PATTERN = /^segment_\d{4}\.ts$/;
       if (!SEGMENT_PATTERN.test(request.params.segment)) {
         return reply.code(400).send({ error: "Invalid segment name" });
       }
-      const segmentPath = join(job.outputDir, request.params.segment);
-      if (!isPathInside(job.outputDir, segmentPath)) {
-        return reply.code(400).send({ error: "Invalid segment path" });
-      }
+      // First segment demand spawns the encoder — disk-space gate lives here
+      // now that the playlist is synthetic (see playback.ts).
+      if (
+        !session.jobs.get(request.params.profile) &&
+        !(await hasEnoughDiskSpace(config))
+      )
+        return reply
+          .code(507)
+          .send({ error: "Insufficient disk space for transcoding" });
       // Paced encoders don't have the whole file ready — wait when the
-      // segment is imminent, restart ffmpeg at the position when it isn't.
+      // segment is imminent, spawn/restart ffmpeg at the position otherwise.
       let readyPath: string;
       try {
         readyPath = await ensureSegmentReady(
@@ -284,6 +297,14 @@ export function registerFederationApiRoutes(
         );
       } catch {
         return reply.code(404).send({ error: "Segment not available" });
+      }
+      const outputDir = join(
+        config.transcodeTmpDir,
+        session.id,
+        request.params.profile,
+      );
+      if (!isPathInside(outputDir, readyPath)) {
+        return reply.code(400).send({ error: "Invalid segment path" });
       }
       return reply
         .header("Content-Type", "video/mp2t")
@@ -303,6 +324,19 @@ export function registerFederationApiRoutes(
           .send({ error: "Session not found or not direct play" });
       // Must be awaited: a floating rejection here would crash the process.
       return serveDirectFile(session.filePath, request, reply);
+    },
+  );
+
+  // Keepalive — getSession's lastAccessed touch is the whole effect. Needed
+  // because synthesized VOD playlists are fetched once, so a peer viewer
+  // paused >10 min would otherwise lose the session to the idle sweep.
+  app.post<{ Params: { sessionId: string } }>(
+    "/federation/api/stream/:sessionId/keepalive",
+    { preHandler: hmac },
+    async (request, reply) => {
+      if (!getSession(request.params.sessionId))
+        return reply.code(404).send({ error: "Session not found" });
+      return reply.code(204).send();
     },
   );
 

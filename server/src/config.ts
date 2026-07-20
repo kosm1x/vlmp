@@ -19,6 +19,7 @@ export interface Config {
   maxTranscodeSessions: number;
   minFreeDiskBytes: number;
   transcodePreset: string;
+  hwTranscode: string;
   emptyTrashOnScan: boolean;
   extractSubsOnScan: boolean;
   ffprobeTimeoutMs: number;
@@ -121,6 +122,19 @@ export function loadConfig(): Config {
       `Invalid VLMP_MIN_FREE_DISK_MB: ${process.env.VLMP_MIN_FREE_DISK_MB}. Must be >= 0.`,
     );
   }
+  // off = software x264 (default, works everywhere). auto = probe
+  // nvenc → qsv → amf → videotoolbox at boot and use the first that actually
+  // encodes (an encoder listed in the ffmpeg build ≠ a working GPU/driver).
+  // A specific name forces that encoder (still probed; falls back to
+  // software with a warning if the probe fails).
+  const hwTranscode = process.env.VLMP_HW_TRANSCODE || "off";
+  const HW_MODES = ["off", "auto", "nvenc", "qsv", "amf", "videotoolbox"];
+  if (!HW_MODES.includes(hwTranscode)) {
+    throw new Error(
+      `Invalid VLMP_HW_TRANSCODE: "${hwTranscode}". Must be one of ${HW_MODES.join(", ")}.`,
+    );
+  }
+
   const transcodePreset = process.env.VLMP_TRANSCODE_PRESET || "veryfast";
   if (!X264_PRESETS.includes(transcodePreset)) {
     throw new Error(
@@ -169,6 +183,7 @@ export function loadConfig(): Config {
     maxTranscodeSessions,
     minFreeDiskBytes: minFreeDiskMb * 1024 * 1024,
     transcodePreset,
+    hwTranscode,
     emptyTrashOnScan: process.env.VLMP_EMPTY_TRASH_ON_SCAN !== "false",
     // Off by default: extraction demuxes each file END TO END, which pins the
     // media drive at 100% for the whole scan. Playback already extracts on
