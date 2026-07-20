@@ -2,6 +2,7 @@ import { h } from "preact";
 import { useState, useEffect, useRef } from "preact/hooks";
 import htm from "htm";
 import { get, post, del, patch, getUserRole, getUserId } from "../api.js";
+import { FolderPicker } from "./FolderPicker.js";
 const html = htm.bind(h);
 
 const CATEGORIES = [
@@ -21,6 +22,7 @@ export function Settings() {
   const [category, setCategory] = useState("movies");
   const [pending, setPending] = useState(false);
   const [busyFolder, setBusyFolder] = useState(null);
+  const [pickerOpen, setPickerOpen] = useState(false);
   const [users, setUsers] = useState(null);
   const [usersError, setUsersError] = useState("");
   const [userFormError, setUserFormError] = useState("");
@@ -191,11 +193,10 @@ export function Settings() {
   }
 
   function scanFolder(folder) {
-    // The scan endpoint holds the request open for the whole scan — fire it,
-    // flip the row to "scanning" locally, and let polling track completion.
-    // A rejected POST (e.g. proxy idle-timeout on a long scan) is not by
-    // itself a failure: re-check and only surface an error if the folder
-    // didn't actually reach a healthy state.
+    // The scan endpoint returns 202 immediately and the scan runs server-side;
+    // polling tracks completion. A rejected POST (network blip, or 409 when a
+    // scan is already running) is not by itself a failure: re-check and only
+    // surface an error if the folder didn't actually reach a healthy state.
     post(`/admin/folders/${folder.id}/scan`, {})
       .then(() => load())
       .catch(async () => {
@@ -334,15 +335,24 @@ export function Settings() {
       <div class="settings-label" id="add-label">Add Folder</div>
       <form class="settings-form" onSubmit=${addFolder}>
         <div class="settings-field grow">
-          <label for="folder-path">Absolute path on the server</label>
-          <input
-            id="folder-path"
-            type="text"
-            placeholder="/mnt/media/movies"
-            value=${path}
-            onInput=${(e) => setPath(e.target.value)}
-            required
-          />
+          <label for="folder-path">Folder on the server</label>
+          <div class="settings-path-row">
+            <input
+              id="folder-path"
+              type="text"
+              placeholder="/mnt/media/movies"
+              value=${path}
+              onInput=${(e) => setPath(e.target.value)}
+              required
+            />
+            <button
+              class="lum-btn"
+              type="button"
+              onClick=${() => setPickerOpen(true)}
+            >
+              Browse…
+            </button>
+          </div>
         </div>
         <div class="settings-field">
           <label for="folder-category">Category</label>
@@ -368,6 +378,16 @@ export function Settings() {
         A scan starts from the folder row after adding. Large libraries scan in
         the background — the status column updates as it progresses.
       </p>
+      ${
+        pickerOpen &&
+        html`<${FolderPicker}
+          onSelect=${(p) => {
+            setPath(p);
+            setPickerOpen(false);
+          }}
+          onCancel=${() => setPickerOpen(false)}
+        />`
+      }
     </section>
 
     <section class="settings-section" aria-labelledby="users-label">

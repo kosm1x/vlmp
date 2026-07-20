@@ -92,6 +92,40 @@ Allow inbound on the chosen port for LAN clients:
 netsh advfirewall firewall add rule name="VLMP" dir=in action=allow protocol=TCP localport=8080
 ```
 
+## Remote access (Tailscale)
+
+The supported way to stream over the internet is a Tailscale tailnet — no
+router changes, no public exposure, traffic is WireGuard-encrypted end to end:
+
+1. Install Tailscale on the server box (`winget install tailscale.tailscale`),
+   sign in, and note the machine name (e.g. `lullabysong`).
+2. Install the Tailscale app on each phone/laptop/TV device and sign in to the
+   same tailnet (family members join via a shared account or Tailscale's
+   invite flow).
+3. From any tailnet device, VLMP is at `http://<machine-name>:8080` — the
+   installer's firewall rule already admits TCP 8080.
+
+Limitations by design: devices must be on your tailnet, so **guest passes
+can't be handed to strangers** — sharing with people outside the household
+needs the public-exposure track (port forward + domain + TLS), which stays
+deferred until after the smoke checklist and hardware transcoding work.
+
+## Metadata / posters (TMDb)
+
+Poster fetching is OFF until a TMDb API key is configured — the boot log says
+`VLMP_TMDB_API_KEY not set` while it's missing. Get a free key at
+<https://www.themoviedb.org/settings/api>, then as Administrator add to
+`C:\ProgramData\vlmp\vlmp.env`:
+
+```
+VLMP_TMDB_API_KEY=<your key>
+```
+
+Restart VLMP. New scans match automatically; for media added before the key
+existed, use the metadata rescan in Settings (or re-scan the folder).
+Media TMDb can't match (personal recordings) get a frame-grab thumbnail
+generated on first view instead.
+
 ## Windows-specific behavior notes
 
 - **Transcode teardown**: FFmpeg can hold segment-file handles for a moment

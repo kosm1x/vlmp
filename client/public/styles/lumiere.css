@@ -311,3 +311,103 @@ body {
     justify-content: flex-start;
   }
 }
+
+/* ---- Folder picker modal ---- */
+.lum-modal-overlay {
+  position: fixed;
+  inset: 0;
+  background: rgba(12, 11, 10, 0.72);
+  backdrop-filter: blur(6px);
+  -webkit-backdrop-filter: blur(6px);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 100;
+  padding: 1rem;
+}
+.lum-modal {
+  background: var(--lum-bg-surface);
+  border: 1px solid var(--lum-border-hover);
+  border-radius: 10px;
+  width: min(480px, 100%);
+  max-height: min(70vh, 560px);
+  display: flex;
+  flex-direction: column;
+  padding: 1.25rem;
+  gap: 0.75rem;
+}
+.lum-modal-title {
+  font-family: var(--lum-font-display);
+  font-size: 1.15rem;
+  color: var(--lum-text-primary);
+}
+.lum-modal-path {
+  font-family: var(--lum-font-ui);
+  font-size: 0.8rem;
+  color: var(--lum-text-secondary);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  direction: rtl; /* keep the tail (deepest segment) visible when truncated */
+  text-align: left;
+}
+.lum-modal-error {
+  color: var(--lum-danger);
+  font-size: 0.8rem;
+}
+.lum-modal-list {
+  flex: 1;
+  min-height: 8rem;
+  overflow-y: auto;
+  border: 1px solid var(--lum-border);
+  border-radius: 8px;
+  display: flex;
+  flex-direction: column;
+}
+.lum-modal-entry {
+  background: none;
+  border: none;
+  border-bottom: 1px solid var(--lum-border);
+  color: var(--lum-text-primary);
+  font-family: var(--lum-font-ui);
+  font-size: 0.85rem;
+  text-align: left;
+  padding: 0.55rem 0.75rem;
+  cursor: pointer;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.lum-modal-entry:hover,
+.lum-modal-entry:focus-visible {
+  background: var(--lum-bg-raised);
+  outline: none;
+}
+.lum-modal-entry.up {
+  color: var(--lum-text-secondary);
+}
+.lum-modal-empty {
+  color: var(--lum-text-dim);
+  font-size: 0.8rem;
+  padding: 0.75rem;
+}
+.lum-modal-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 0.5rem;
+}
+.lum-btn.primary {
+  border-color: var(--lum-gold);
+  color: var(--lum-gold);
+}
+.lum-btn.primary:hover:not(:disabled) {
+  background: var(--lum-gold);
+  color: var(--lum-bg);
+}
+.settings-path-row {
+  display: flex;
+  gap: 0.5rem;
+}
+.settings-path-row input {
+  flex: 1;
+}

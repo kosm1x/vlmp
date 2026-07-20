@@ -8,11 +8,13 @@ import { execFile } from "node:child_process";
 import { loadConfig } from "./config.js";
 import { getDatabase, closeDatabase } from "./db/index.js";
 import { initSchema } from "./db/schema.js";
+import { resetInterruptedScans } from "./media/library.js";
 import { startCleanupLoop } from "./db/cleanup.js";
 import { startBackupLoop } from "./db/backup.js";
 import { registerAuthRoutes } from "./routes/auth.js";
 import { registerUserRoutes } from "./routes/users.js";
 import { registerLibraryRoutes } from "./routes/library.js";
+import { registerFsRoutes } from "./routes/fs.js";
 import { registerProgressRoutes } from "./routes/progress.js";
 import { registerPlaybackRoutes } from "./routes/playback.js";
 import { registerMetadataRoutes } from "./routes/metadata.js";
@@ -69,6 +71,7 @@ config.serverFingerprint = loadOrGenerateFingerprint(config.dataDir);
 
 const db = getDatabase(config);
 initSchema(db);
+resetInterruptedScans(db);
 
 const app = Fastify({
   logger: {
@@ -128,7 +131,9 @@ app.addHook("onSend", async (_request, reply, payload) => {
   if (ct && ct.includes("video/mp2t")) return payload;
   reply.header(
     "Content-Security-Policy",
-    "default-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline'; img-src 'self' https://image.tmdb.org data:; media-src 'self' blob:; connect-src 'self'; frame-ancestors 'none'",
+    // img-src blob: — generated thumbnails are fetched with the Authorization
+    // header and rendered via object URLs (plain <img src> can't carry a JWT).
+    "default-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline'; img-src 'self' https://image.tmdb.org data: blob:; media-src 'self' blob:; connect-src 'self'; frame-ancestors 'none'",
   );
   reply.header(
     "Strict-Transport-Security",
@@ -147,6 +152,7 @@ app.addHook("onSend", async (_request, reply, payload) => {
 registerAuthRoutes(app, db, config);
 registerUserRoutes(app, db, config);
 registerLibraryRoutes(app, db, config);
+registerFsRoutes(app, db, config);
 registerProgressRoutes(app, db, config);
 registerPlaybackRoutes(app, db, config);
 registerMetadataRoutes(app, db, config);

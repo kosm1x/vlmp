@@ -20,6 +20,8 @@ export interface Config {
   minFreeDiskBytes: number;
   transcodePreset: string;
   emptyTrashOnScan: boolean;
+  extractSubsOnScan: boolean;
+  ffprobeTimeoutMs: number;
   backupDir: string;
   backupIntervalHours: number;
   backupRetention: number;
@@ -168,6 +170,15 @@ export function loadConfig(): Config {
     minFreeDiskBytes: minFreeDiskMb * 1024 * 1024,
     transcodePreset,
     emptyTrashOnScan: process.env.VLMP_EMPTY_TRASH_ON_SCAN !== "false",
+    // Off by default: extraction demuxes each file END TO END, which pins the
+    // media drive at 100% for the whole scan. Playback already extracts on
+    // demand (routes/subtitles.ts); this exists for operators who prefer to
+    // pre-warm subtitles overnight.
+    extractSubsOnScan: process.env.VLMP_EXTRACT_SUBS_ON_SCAN === "true",
+    ffprobeTimeoutMs: parseInt(
+      process.env.VLMP_FFPROBE_TIMEOUT_MS || "30000",
+      10,
+    ),
     backupDir: resolve(dataDir, "backups"),
     backupIntervalHours,
     backupRetention,

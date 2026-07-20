@@ -1,12 +1,31 @@
-import { readdir, stat } from 'node:fs/promises';
-import { join, extname } from 'node:path';
+import { readdir, stat } from "node:fs/promises";
+import { join, extname } from "node:path";
 
 const VIDEO_EXTENSIONS = new Set([
-  '.mkv', '.mp4', '.avi', '.mov', '.wmv', '.flv', '.webm', '.m4v',
-  '.mpg', '.mpeg', '.ts', '.vob', '.3gp', '.ogv',
+  ".mkv",
+  ".mp4",
+  ".avi",
+  ".mov",
+  ".wmv",
+  ".flv",
+  ".webm",
+  ".m4v",
+  ".mpg",
+  ".mpeg",
+  ".ts",
+  ".vob",
+  ".3gp",
+  ".ogv",
 ]);
 const AUDIO_EXTENSIONS = new Set([
-  '.mp3', '.m4a', '.flac', '.aac', '.ogg', '.wma', '.wav', '.opus',
+  ".mp3",
+  ".m4a",
+  ".flac",
+  ".aac",
+  ".ogg",
+  ".wma",
+  ".wav",
+  ".opus",
 ]);
 
 export interface DiscoveredFile {
@@ -16,15 +35,27 @@ export interface DiscoveredFile {
   isAudio: boolean;
 }
 
-export async function discoverMedia(rootPath: string): Promise<DiscoveredFile[]> {
+export async function discoverMedia(
+  rootPath: string,
+): Promise<DiscoveredFile[]> {
+  // An unreadable ROOT is a scan error (typo'd path, unmounted drive), not an
+  // empty library; deeper unreadable subdirectories are still skipped quietly.
+  await readdir(rootPath);
   const results: DiscoveredFile[] = [];
   await walkDir(rootPath, results);
   return results;
 }
 
-async function walkDir(dirPath: string, results: DiscoveredFile[]): Promise<void> {
+async function walkDir(
+  dirPath: string,
+  results: DiscoveredFile[],
+): Promise<void> {
   let entries;
-  try { entries = await readdir(dirPath, { withFileTypes: true }); } catch { return; }
+  try {
+    entries = await readdir(dirPath, { withFileTypes: true });
+  } catch {
+    return;
+  }
   for (const entry of entries) {
     const fullPath = join(dirPath, entry.name);
     if (entry.isDirectory()) {
@@ -36,8 +67,15 @@ async function walkDir(dirPath: string, results: DiscoveredFile[]): Promise<void
       if (isVideo || isAudio) {
         try {
           const fileStat = await stat(fullPath);
-          results.push({ path: fullPath, size: fileStat.size, isVideo, isAudio });
-        } catch { /* skip */ }
+          results.push({
+            path: fullPath,
+            size: fileStat.size,
+            isVideo,
+            isAudio,
+          });
+        } catch {
+          /* skip */
+        }
       }
     }
   }

@@ -111,6 +111,17 @@ export function isMediaFolderVisible(
   return !!row;
 }
 
+// Boot-time fixup: scans run in-process, so none survive a restart. A folder
+// left in 'scanning' is an interrupted scan — and the UI disables its
+// Scan/Remove buttons for as long as the status says so.
+export function resetInterruptedScans(db: Database.Database): number {
+  return db
+    .prepare(
+      "UPDATE library_folders SET scan_status = 'error' WHERE scan_status = 'scanning'",
+    )
+    .run().changes;
+}
+
 export function removeLibraryFolder(
   db: Database.Database,
   id: number,
@@ -200,8 +211,15 @@ export async function scanLibraryFolder(
           }
         }
 
-        // Extract subtitles if present (non-fatal)
-        if (probe?.subtitleTracks && probe.subtitleTracks.length > 0) {
+        // Extract subtitles if present (non-fatal). Off by default: extraction
+        // demuxes the ENTIRE file, so a full-library scan pins the media drive
+        // at 100% read for hours. Playback-time extraction covers the normal
+        // path; VLMP_EXTRACT_SUBS_ON_SCAN=true opts back in.
+        if (
+          config.extractSubsOnScan &&
+          probe?.subtitleTracks &&
+          probe.subtitleTracks.length > 0
+        ) {
           try {
             const extracted = await extractSubtitles(
               file.path,

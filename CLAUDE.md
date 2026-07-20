@@ -33,6 +33,8 @@ Server handles transcoding, metadata, subtitles. Client is a thin Preact shell s
 | `server/src/ai/cache.ts`              | TTL-based recommendation cache                             |
 | `server/src/ai/recommender.ts`        | 5-strategy recommendation engine                           |
 | `server/src/ai/health.ts`             | Library health checks + cleanup (async)                    |
+| `server/src/metadata/thumbs.ts`       | Frame-grab thumbnail fallback (lazy, fail-marker cached)   |
+| `server/src/routes/fs.ts`             | Admin directory browser backing the Settings folder picker |
 | `server/src/routes/params.ts`         | Shared parseInt route param validation                     |
 | `server/src/db/cleanup.ts`            | Periodic expired row cleanup (invites, cache, viewing_log) |
 | `server/src/routes/*.ts`              | API route handlers                                         |

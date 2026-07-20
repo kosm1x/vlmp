@@ -1,5 +1,6 @@
 import type { FastifyInstance } from "fastify";
 import type Database from "better-sqlite3";
+import { stat } from "node:fs/promises";
 import type { Config } from "../config.js";
 import { authMiddleware, adminOnly } from "../auth/middleware.js";
 import {
@@ -126,6 +127,18 @@ export function registerLibraryRoutes(
     },
     async (request, reply) => {
       const { path, category } = request.body;
+      // A typo'd path would otherwise create a row that scans to an empty
+      // library with no hint of what went wrong.
+      let isDir = false;
+      try {
+        isDir = (await stat(path)).isDirectory();
+      } catch {
+        /* not found */
+      }
+      if (!isDir)
+        return reply
+          .code(400)
+          .send({ error: "Folder does not exist on the server" });
       return reply.code(201).send(addLibraryFolder(db, path, category));
     },
   );
@@ -176,8 +189,32 @@ export function registerLibraryRoutes(
         .prepare("SELECT * FROM library_folders WHERE id = ?")
         .get(id) as LibraryFolder | undefined;
       if (!folder) return reply.code(404).send({ error: "Folder not found" });
-      const { added, pruned } = await scanLibraryFolder(db, folder, config);
-      return reply.send({ added, pruned, folder_id: id });
+      // Atomic claim doubles as the concurrency guard — two racing POSTs
+      // can't both start a scan of the same folder.
+      const claimed = db
+        .prepare(
+          "UPDATE library_folders SET scan_status = 'scanning' WHERE id = ? AND scan_status != 'scanning'",
+        )
+        .run(id);
+      if (claimed.changes === 0)
+        return reply.code(409).send({ error: "Scan already running" });
+      // Fire-and-forget: holding the request open for a whole-library scan
+      // meant proxy idle-timeouts aborted the response and a dead client
+      // connection was indistinguishable from a dead scan. The client polls
+      // scan_status instead, and scanLibraryFolder records completion/error.
+      scanLibraryFolder(db, folder, config).catch((err) => {
+        request.log.error({ err, folder_id: id }, "background scan failed");
+        // scanLibraryFolder sets 'error' itself before rethrowing; this covers
+        // a reject before its try block so the claim can't stick as 'scanning'.
+        try {
+          db.prepare(
+            "UPDATE library_folders SET scan_status = 'error' WHERE id = ? AND scan_status = 'scanning'",
+          ).run(id);
+        } catch {
+          /* status reset is best-effort */
+        }
+      });
+      return reply.code(202).send({ folder_id: id, status: "scanning" });
     },
   );
 }

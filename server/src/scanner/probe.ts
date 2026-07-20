@@ -30,13 +30,21 @@ export async function probeFile(
   filePath: string,
   config: Config,
 ): Promise<ProbeResult> {
-  const raw = await runFFprobe(filePath, config.ffprobePath);
+  const raw = await runFFprobe(
+    filePath,
+    config.ffprobePath,
+    config.ffprobeTimeoutMs,
+  );
   return parseProbeOutput(raw);
 }
 
 const MAX_PROBE_STDOUT = 1_048_576; // 1 MB
 
-function runFFprobe(filePath: string, ffprobePath: string): Promise<string> {
+function runFFprobe(
+  filePath: string,
+  ffprobePath: string,
+  timeoutMs: number,
+): Promise<string> {
   return new Promise((resolve, reject) => {
     const proc = spawn(ffprobePath, [
       "-v",
@@ -51,10 +59,23 @@ function runFFprobe(filePath: string, ffprobePath: string): Promise<string> {
     let stdout = "";
     let stderr = "";
     let killed = false;
+    // A stalled ffprobe (dying drive, network mount) would otherwise wedge the
+    // scan forever with the folder stuck in scan_status='scanning'.
+    const timer = setTimeout(() => {
+      if (!killed) {
+        killed = true;
+        proc.kill("SIGKILL");
+        reject(
+          new Error(`ffprobe timed out after ${timeoutMs}ms: ${filePath}`),
+        );
+      }
+    }, timeoutMs);
+    timer.unref();
     proc.stdout.on("data", (d: Buffer) => {
       stdout += d.toString();
       if (stdout.length > MAX_PROBE_STDOUT && !killed) {
         killed = true;
+        clearTimeout(timer);
         proc.kill("SIGTERM");
         reject(new Error("ffprobe output exceeded 1MB limit"));
       }
@@ -63,12 +84,14 @@ function runFFprobe(filePath: string, ffprobePath: string): Promise<string> {
       stderr += d.toString();
     });
     proc.on("close", (code) => {
+      clearTimeout(timer);
       if (killed) return;
       code === 0
         ? resolve(stdout)
         : reject(new Error(`ffprobe exit ${code}: ${stderr}`));
     });
     proc.on("error", (err) => {
+      clearTimeout(timer);
       if (!killed) reject(err);
     });
   });

@@ -1,6 +1,7 @@
 import { h } from "preact";
 import htm from "htm";
 import { navigate } from "../router.js";
+import { ThumbImg } from "./ThumbImg.js";
 const html = htm.bind(h);
 export function MediaCard({ item }) {
   const progress =
@@ -13,16 +14,24 @@ export function MediaCard({ item }) {
     onClick=${() => navigate("/detail/" + mediaId)}
   >
     <div class="media-card-poster">
-      ${item.poster_path
-        ? html`<img src=${item.poster_path} alt=${item.title} loading="lazy" />`
-        : html`<div class="no-poster">${item.title}</div>`}
-      ${progress > 0 &&
-      html`<div class="media-card-progress">
-        <div
-          class="media-card-progress-bar"
-          style=${{ width: progress + "%" }}
-        ></div>
-      </div>`}
+      ${
+        item.poster_path
+          ? html`<img
+              src=${item.poster_path}
+              alt=${item.title}
+              loading="lazy"
+            />`
+          : html`<${ThumbImg} mediaId=${mediaId} title=${item.title} />`
+      }
+      ${
+        progress > 0 &&
+        html`<div class="media-card-progress">
+          <div
+            class="media-card-progress-bar"
+            style=${{ width: progress + "%" }}
+          ></div>
+        </div>`
+      }
       <button
         class="media-card-play"
         onClick=${(e) => {

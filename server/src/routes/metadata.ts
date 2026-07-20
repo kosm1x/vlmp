@@ -9,6 +9,9 @@ import {
   applyManualMatch,
 } from "../metadata/matcher.js";
 import { parseIntParam } from "./params.js";
+import { getOrCreateThumb } from "../metadata/thumbs.js";
+import { isMediaFolderVisible } from "../media/library.js";
+import { createReadStream } from "node:fs";
 
 let metadataScanInProgress = false;
 
@@ -18,6 +21,27 @@ export function registerMetadataRoutes(
   config: Config,
 ): void {
   const auth = authMiddleware(config, db);
+
+  // Frame-grab thumbnail fallback for media without a TMDb poster. Same
+  // access boundary as media detail: non-admins only reach media in visible
+  // folders (404, not 403 — existence must not leak). The client fetches this
+  // with the Authorization header and renders a blob URL.
+  app.get<{ Params: { id: string } }>(
+    "/media/:id/thumb",
+    { preHandler: auth },
+    async (request, reply) => {
+      const id = parseIntParam(request.params.id, "id");
+      if (request.user!.role !== "admin" && !isMediaFolderVisible(db, id))
+        return reply.code(404).send({ error: "Not found" });
+      const path = await getOrCreateThumb(db, id, config);
+      if (!path) return reply.code(404).send({ error: "No thumbnail" });
+      reply.header("Content-Type", "image/jpeg");
+      // private: thumbs sit behind auth; immutable-ish: regenerated only if
+      // the thumbs dir is wiped, so a day of client caching is safe.
+      reply.header("Cache-Control", "private, max-age=86400");
+      return reply.send(createReadStream(path));
+    },
+  );
 
   app.get<{ Querystring: { q: string; type?: string; year?: string } }>(
     "/metadata/search",

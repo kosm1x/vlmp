@@ -1,11 +1,9 @@
 import { h } from "preact";
-import {
-  useState,
-  useEffect,
-} from "preact/hooks";
+import { useState, useEffect } from "preact/hooks";
 import htm from "htm";
 import { get, post, del } from "../api.js";
 import { navigate } from "../router.js";
+import { ThumbImg } from "./ThumbImg.js";
 import { MediaRow } from "./MediaRow.js";
 const html = htm.bind(h);
 
@@ -99,33 +97,43 @@ export function MediaDetail({ id, serverId }) {
   const rating = media.rating ? media.rating.toFixed(1) : null;
 
   return html`<div class="detail-page">
-    ${media.backdrop_path &&
-    html`<div
-      class="detail-backdrop"
-      style=${{ backgroundImage: "url(" + media.backdrop_path + ")" }}
-    ></div>`}
+    ${
+      media.backdrop_path &&
+      html`<div
+        class="detail-backdrop"
+        style=${{ backgroundImage: "url(" + media.backdrop_path + ")" }}
+      ></div>`
+    }
     <div class="detail-content">
       <div class="detail-poster">
-        ${media.poster_path
-          ? html`<img src=${media.poster_path} alt=${media.title} />`
-          : html`<div class="no-poster detail-no-poster">${media.title}</div>`}
+        ${
+          media.poster_path
+            ? html`<img src=${media.poster_path} alt=${media.title} />`
+            : html`<${ThumbImg} mediaId=${media.id} title=${media.title} />`
+        }
       </div>
       <div class="detail-info">
         <h1 class="detail-title">${media.title}</h1>
         <div class="detail-meta">
           ${media.year && html`<span class="detail-year">${media.year}</span>`}
           ${rating && html`<span class="detail-rating">★ ${rating}</span>`}
-          ${media.duration &&
-          html`<span class="detail-duration"
-            >${Math.floor(media.duration / 60)} min</span
-          >`}
+          ${
+            media.duration &&
+            html`<span class="detail-duration"
+              >${Math.floor(media.duration / 60)} min</span
+            >`
+          }
         </div>
-        ${genres.length > 0 &&
-        html`<div class="detail-genres">
-          ${genres.map((g) => html`<span class="detail-genre">${g}</span>`)}
-        </div>`}
-        ${media.description &&
-        html`<p class="detail-description">${media.description}</p>`}
+        ${
+          genres.length > 0 &&
+          html`<div class="detail-genres">
+            ${genres.map((g) => html`<span class="detail-genre">${g}</span>`)}
+          </div>`
+        }
+        ${
+          media.description &&
+          html`<p class="detail-description">${media.description}</p>`
+        }
         <div class="detail-actions">
           <button
             class="detail-play-btn"
@@ -142,52 +150,62 @@ export function MediaDetail({ id, serverId }) {
           >
             + Playlist
           </button>
-          ${!isRemote &&
-          html`<button
-              class=${`detail-btn${preference === "like" ? " active" : ""}`}
-              onClick=${() => togglePreference("like")}
-            >
-              Like
-            </button>
-            <button
-              class=${`detail-btn${preference === "dislike" ? " active" : ""}`}
-              onClick=${() => togglePreference("dislike")}
-            >
-              Dislike
-            </button>`}
+          ${
+            !isRemote &&
+            html`<button
+                class=${`detail-btn${preference === "like" ? " active" : ""}`}
+                onClick=${() => togglePreference("like")}
+              >
+                Like
+              </button>
+              <button
+                class=${`detail-btn${preference === "dislike" ? " active" : ""}`}
+                onClick=${() => togglePreference("dislike")}
+              >
+                Dislike
+              </button>`
+          }
         </div>
-        ${showPlaylistPicker &&
-        html`<div class="detail-playlist-picker">
-          ${playlists.length === 0
-            ? html`<div class="detail-picker-empty">No playlists yet</div>`
-            : playlists.map(
-                (p) =>
-                  html`<div
-                    class="detail-picker-item"
-                    onClick=${() => addToPlaylist(p.id)}
-                  >
-                    ${p.name}
-                  </div>`,
-              )}
-        </div>`}
-        ${subtitles.length > 0 &&
-        html`<div class="detail-subtitles">
-          <h3>Subtitles</h3>
-          ${subtitles.map(
-            (s) =>
-              html`<span class="detail-subtitle-tag"
-                >${s.label || s.language || "Unknown"}</span
-              >`,
-          )}
-        </div>`}
+        ${
+          showPlaylistPicker &&
+          html`<div class="detail-playlist-picker">
+            ${
+              playlists.length === 0
+                ? html`<div class="detail-picker-empty">No playlists yet</div>`
+                : playlists.map(
+                    (p) =>
+                      html`<div
+                        class="detail-picker-item"
+                        onClick=${() => addToPlaylist(p.id)}
+                      >
+                        ${p.name}
+                      </div>`,
+                  )
+            }
+          </div>`
+        }
+        ${
+          subtitles.length > 0 &&
+          html`<div class="detail-subtitles">
+            <h3>Subtitles</h3>
+            ${subtitles.map(
+              (s) =>
+                html`<span class="detail-subtitle-tag"
+                  >${s.label || s.language || "Unknown"}</span
+                >`,
+            )}
+          </div>`
+        }
       </div>
     </div>
-    ${!isRemote &&
-    similar.length > 0 &&
-    html`<div
-      style=${{ padding: "0 2rem 2rem", maxWidth: "1100px", margin: "0 auto" }}
-    >
-      <${MediaRow} label="Similar" items=${similar} />
-    </div>`}
+    ${
+      !isRemote &&
+      similar.length > 0 &&
+      html`<div
+        style=${{ padding: "0 2rem 2rem", maxWidth: "1100px", margin: "0 auto" }}
+      >
+        <${MediaRow} label="Similar" items=${similar} />
+      </div>`
+    }
   </div>`;
 }
