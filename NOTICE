@@ -1,0 +1,12 @@
+VLMP - Very Light Media Player
+Copyright 2026 kosm1x
+
+This product includes software developed as an independent, personal
+open-source project. It is not affiliated with, endorsed by, or connected
+to Plex Inc., the Jellyfin project, or The Movie Database (TMDb).
+
+TMDb metadata is retrieved via the TMDb API. This product uses the TMDb
+API but is not endorsed or certified by TMDb.
+
+Licensed under the Apache License, Version 2.0. See the LICENSE file for
+the full license text.
