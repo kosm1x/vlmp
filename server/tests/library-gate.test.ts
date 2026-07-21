@@ -301,21 +301,16 @@ describe("library gate — cross-folder TV show", () => {
       "INSERT INTO episodes (season_id, media_id, episode_number) VALUES (?, ?, 1), (?, ?, 2)",
     ).run(season.id, e1.id, season.id, e2.id);
 
+    // getTVShowDetail returns parsed episode arrays (gated nulls dropped).
     const asUser = getTVShowDetail(db, show.id, false) as {
-      seasons: { episodes: string }[];
+      seasons: { episodes: { media_id: number }[] }[];
     };
-    const userEps = JSON.parse(asUser.seasons[0].episodes).filter(
-      (e: { id: number | null }) => e.id !== null,
-    );
-    expect(userEps.map((e: { media_id: number }) => e.media_id)).toEqual([
-      e1.id,
-    ]);
+    expect(asUser.seasons[0].episodes.map((e) => e.media_id)).toEqual([e1.id]);
 
     const asAdmin = getTVShowDetail(db, show.id, true) as {
-      seasons: { episodes: string }[];
+      seasons: { episodes: { media_id: number }[] }[];
     };
-    const adminEps = JSON.parse(asAdmin.seasons[0].episodes);
-    expect(adminEps).toHaveLength(2);
+    expect(asAdmin.seasons[0].episodes).toHaveLength(2);
   });
 });
 

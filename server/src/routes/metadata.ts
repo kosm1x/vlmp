@@ -10,7 +10,8 @@ import {
 } from "../metadata/matcher.js";
 import { parseIntParam } from "./params.js";
 import { getOrCreateThumb } from "../metadata/thumbs.js";
-import { classifyByFolder, type MediaCategory } from "../scanner/classify.js";
+import { classifyMedia } from "../scanner/classify.js";
+import { getCategoryBySlug } from "../media/categories.js";
 import { isMediaFolderVisible } from "../media/library.js";
 import { createReadStream } from "node:fs";
 
@@ -160,10 +161,13 @@ export function registerMetadataRoutes(
           // ("300" stored as "720P BRRIP XVID…") that TMDb can never match.
           // Matched items are left alone — their titles came from TMDb.
           if (!item.poster_path) {
-            const c = classifyByFolder(
+            const c = classifyMedia(
               item.file_path,
               item.folder_path,
-              item.category as MediaCategory,
+              getCategoryBySlug(db, item.category) ?? {
+                slug: item.category,
+                kind: "movie",
+              },
             );
             const sortTitle = c.title
               .replace(/^(?:the|a|an)\s+/i, "")

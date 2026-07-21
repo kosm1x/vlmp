@@ -136,6 +136,22 @@ software x264 for the rest of the run, and the interrupted stream restarts
 itself. If you see that line during normal use, report it — it means the
 GPU pipeline rejected that specific media.
 
+## Subtitles from OpenSubtitles (v0.1.7+)
+
+Every title's detail page shows whether subtitles exist (chip next to
+Like/Dislike). To enable the "Search OpenSubtitles" button, get a free API
+key at <https://www.opensubtitles.com/consumers> and add to
+`C:\ProgramData\vlmp\vlmp.env` as Administrator:
+
+```
+VLMP_OPENSUBTITLES_API_KEY=<your key>
+```
+
+Restart VLMP. Any logged-in user can then search by language (`en,es`, …)
+and apply a subtitle — it's converted to VTT, stored with the title, and
+offered by the player on the next Play. Free keys have a small daily
+download quota; quota errors are shown verbatim in the panel.
+
 ## Metadata / posters (TMDb)
 
 Poster fetching is OFF until a TMDb API key is configured — the boot log says

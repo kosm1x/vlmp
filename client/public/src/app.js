@@ -9,6 +9,7 @@ import { Browse } from "./components/Browse.js";
 import { Player } from "./components/Player.js";
 import { Search } from "./components/Search.js";
 import { MediaDetail } from "./components/MediaDetail.js";
+import { ShowDetail } from "./components/ShowDetail.js";
 import { Playlists } from "./components/Playlists.js";
 import { PlaylistDetail } from "./components/PlaylistDetail.js";
 import { Servers } from "./components/Servers.js";
@@ -16,22 +17,6 @@ import { ServerBrowse } from "./components/ServerBrowse.js";
 import { HealthDashboard } from "./components/HealthDashboard.js";
 import { Settings } from "./components/Settings.js";
 const html = htm.bind(h);
-
-function NotFound() {
-  return html`<div class="empty" style=${{ paddingTop: "120px" }}>
-    <h2>Page not found</h2>
-    <p>The page you're looking for doesn't exist.</p>
-    <a
-      href="#/"
-      style=${{
-        color: "var(--accent)",
-        marginTop: "1rem",
-        display: "inline-block",
-      }}
-      >Go home</a
-    >
-  </div>`;
-}
 
 function App() {
   const [route, setRoute] = useState(getRoute());
@@ -73,6 +58,9 @@ function App() {
     case "detail":
       content = html`<${MediaDetail} id=${pathParts[1]} />`;
       break;
+    case "show":
+      content = html`<${ShowDetail} id=${pathParts[1]} />`;
+      break;
     case "playlists":
       content = pathParts[1]
         ? html`<${PlaylistDetail} id=${pathParts[1]} />`
@@ -94,21 +82,11 @@ function App() {
         content = html`<${ServerBrowse} serverId=${pathParts[1]} />`;
       else content = html`<${Servers} />`;
       break;
-    default: {
-      const knownCategories = [
-        undefined,
-        "movies",
-        "tv",
-        "documentaries",
-        "education",
-        "doc_series",
-        "other",
-      ];
-      if (!pathParts[0] || knownCategories.includes(pathParts[0]))
-        content = html`<${Browse} category=${pathParts[0] || null} />`;
-      else content = html`<${NotFound} />`;
+    default:
+      // Category slugs are dynamic (user-created in Settings) — Browse
+      // validates the slug against /categories and renders not-found itself.
+      content = html`<${Browse} category=${pathParts[0] || null} />`;
       break;
-    }
   }
   return html`<${Shell}>${content}</${Shell}>`;
 }

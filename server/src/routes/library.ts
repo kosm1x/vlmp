@@ -1,4 +1,4 @@
-import type { FastifyInstance } from "fastify";
+import type { FastifyInstance, FastifyReply, FastifyRequest } from "fastify";
 import type Database from "better-sqlite3";
 import { stat } from "node:fs/promises";
 import type { Config } from "../config.js";
@@ -18,7 +18,13 @@ import {
   isShowVisible,
   type LibraryFolder,
 } from "../media/library.js";
-import type { MediaCategory } from "../scanner/classify.js";
+import {
+  listCategories,
+  getCategoryBySlug,
+  createCategory,
+  deleteCategory,
+  type CategoryKind,
+} from "../media/categories.js";
 import { parseIntParam } from "./params.js";
 
 export function registerLibraryRoutes(
@@ -35,9 +41,11 @@ export function registerLibraryRoutes(
       limit?: string;
       offset?: string;
       search?: string;
+      exclude_episodes?: string;
     };
   }>("/library/browse", { preHandler: auth }, async (request) => {
-    const { type, category, limit, offset, search } = request.query;
+    const { type, category, limit, offset, search, exclude_episodes } =
+      request.query;
     return browseLibrary(db, {
       type,
       category,
@@ -45,8 +53,49 @@ export function registerLibraryRoutes(
       offset: offset ? parseInt(offset, 10) : undefined,
       search,
       includeHidden: request.user!.role === "admin",
+      excludeEpisodes: exclude_episodes === "1" || exclude_episodes === "true",
     });
   });
+
+  // Categories are user data now (create/delete in Settings), so every
+  // logged-in client needs the list to build its nav and browse pages.
+  app.get("/categories", { preHandler: auth }, async () => listCategories(db));
+
+  app.post<{ Body: { label: string; kind: CategoryKind; slug?: string } }>(
+    "/admin/categories",
+    {
+      schema: {
+        body: {
+          type: "object",
+          required: ["label", "kind"],
+          properties: {
+            label: { type: "string", minLength: 1, maxLength: 80 },
+            kind: { type: "string", enum: ["movie", "series"] },
+            slug: { type: "string", minLength: 1, maxLength: 40 },
+          },
+          additionalProperties: false,
+        },
+      },
+      preHandler: [auth, adminOnly],
+    },
+    async (request, reply) => {
+      const result = createCategory(db, request.body);
+      if (!result.ok) return reply.code(409).send({ error: result.error });
+      return reply.code(201).send(result.category);
+    },
+  );
+
+  app.delete<{ Params: { id: string } }>(
+    "/admin/categories/:id",
+    { preHandler: [auth, adminOnly] },
+    async (request, reply) => {
+      const id = parseIntParam(request.params.id, "id");
+      const result = deleteCategory(db, id);
+      if (!result.ok)
+        return reply.code(result.status).send({ error: result.error });
+      return reply.code(204).send();
+    },
+  );
 
   app.get<{ Querystring: { limit?: string } }>(
     "/library/recent",
@@ -74,32 +123,50 @@ export function registerLibraryRoutes(
     },
   );
 
-  app.get("/library/tv/shows", { preHandler: auth }, async (request) =>
-    getTVShows(db, request.user!.role === "admin"),
+  // Shows are no longer TV-only (any category can hold series) —
+  // /library/shows is the canonical path; /library/tv/shows stays as a
+  // compatibility alias for pre-0.2 API consumers.
+  const showsHandler = async (
+    request: FastifyRequest<{ Querystring: { category?: string } }>,
+  ) => getTVShows(db, request.user!.role === "admin", request.query.category);
+  app.get<{ Querystring: { category?: string } }>(
+    "/library/shows",
+    { preHandler: auth },
+    showsHandler,
+  );
+  app.get<{ Querystring: { category?: string } }>(
+    "/library/tv/shows",
+    { preHandler: auth },
+    showsHandler,
   );
 
+  const showDetailHandler = async (
+    request: FastifyRequest<{ Params: { id: string } }>,
+    reply: FastifyReply,
+  ) => {
+    const showId = parseIntParam(request.params.id, "id");
+    if (request.user!.role !== "admin" && !isShowVisible(db, showId))
+      return reply.code(404).send({ error: "Show not found" });
+    const result = getTVShowDetail(db, showId, request.user!.role === "admin");
+    if (!result) return reply.code(404).send({ error: "Show not found" });
+    return result;
+  };
+  app.get<{ Params: { id: string } }>(
+    "/library/shows/:id",
+    { preHandler: auth },
+    showDetailHandler,
+  );
   app.get<{ Params: { id: string } }>(
     "/library/tv/shows/:id",
     { preHandler: auth },
-    async (request, reply) => {
-      const showId = parseIntParam(request.params.id, "id");
-      if (request.user!.role !== "admin" && !isShowVisible(db, showId))
-        return reply.code(404).send({ error: "Show not found" });
-      const result = getTVShowDetail(
-        db,
-        showId,
-        request.user!.role === "admin",
-      );
-      if (!result) return reply.code(404).send({ error: "Show not found" });
-      return result;
-    },
+    showDetailHandler,
   );
 
   app.get("/admin/folders", { preHandler: [auth, adminOnly] }, async () =>
     getLibraryFolders(db),
   );
 
-  app.post<{ Body: { path: string; category: MediaCategory } }>(
+  app.post<{ Body: { path: string; category: string } }>(
     "/admin/folders",
     {
       schema: {
@@ -108,17 +175,7 @@ export function registerLibraryRoutes(
           required: ["path", "category"],
           properties: {
             path: { type: "string", minLength: 1 },
-            category: {
-              type: "string",
-              enum: [
-                "movies",
-                "tv",
-                "documentaries",
-                "doc_series",
-                "education",
-                "other",
-              ],
-            },
+            category: { type: "string", minLength: 1, maxLength: 40 },
           },
           additionalProperties: false,
         },
@@ -127,6 +184,11 @@ export function registerLibraryRoutes(
     },
     async (request, reply) => {
       const { path, category } = request.body;
+      // Categories live in the DB now — validate against it, not a frozen enum.
+      if (!getCategoryBySlug(db, category))
+        return reply
+          .code(400)
+          .send({ error: `Unknown category "${category}"` });
       // A typo'd path would otherwise create a row that scans to an empty
       // library with no hint of what went wrong.
       let isDir = false;

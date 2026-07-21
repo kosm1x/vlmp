@@ -14,6 +14,12 @@ import {
   type Subtitle,
 } from "../subtitles/service.js";
 import { extractSubtitles } from "../subtitles/extract.js";
+import {
+  searchOpenSubtitles,
+  downloadAndPersistSubtitle,
+  sanitizeLanguages,
+  OpenSubtitlesError,
+} from "../subtitles/opensubtitles.js";
 import { probeFile } from "../scanner/probe.js";
 import { isMediaFolderVisible } from "../media/library.js";
 import { isPathInside } from "../paths.js";
@@ -105,6 +111,97 @@ export function registerSubtitleRoutes(
     reply.header("Access-Control-Allow-Origin", "*");
     return reply.send(createReadStream(normalizedPath));
   });
+
+  // OpenSubtitles search/apply. Deliberately NOT admin-only: any household
+  // member finding a title unsubtitled should be able to fix it — the write
+  // is additive (a subtitle row) and quota problems surface as 502s.
+  app.get<{ Params: { mediaId: string }; Querystring: { languages?: string } }>(
+    "/subtitles/:mediaId/opensubtitles/search",
+    { preHandler: auth },
+    async (request, reply) => {
+      if (!config.opensubtitlesApiKey)
+        return reply.code(503).send({
+          error:
+            "OpenSubtitles is not configured — set VLMP_OPENSUBTITLES_API_KEY (free key at opensubtitles.com/consumers)",
+        });
+      const mediaId = parseIntParam(request.params.mediaId, "mediaId");
+      if (request.user!.role !== "admin" && !isMediaFolderVisible(db, mediaId))
+        return reply.code(404).send({ error: "Not found" });
+      const media = db
+        .prepare("SELECT title, year FROM media_items WHERE id = ?")
+        .get(mediaId) as { title: string; year: number | null } | undefined;
+      if (!media) return reply.code(404).send({ error: "Media not found" });
+      const tmdbId = db
+        .prepare(
+          "SELECT external_id FROM metadata_cache WHERE media_id = ? AND provider = 'tmdb'",
+        )
+        .pluck()
+        .get(mediaId) as string | undefined;
+      try {
+        const results = await searchOpenSubtitles(
+          config,
+          { title: media.title, year: media.year, tmdbId: tmdbId ?? null },
+          sanitizeLanguages(request.query.languages),
+        );
+        return { results };
+      } catch (err) {
+        if (err instanceof OpenSubtitlesError)
+          return reply.code(502).send({ error: err.message });
+        throw err;
+      }
+    },
+  );
+
+  app.post<{
+    Params: { mediaId: string };
+    Body: { file_id: number; language: string };
+  }>(
+    "/subtitles/:mediaId/opensubtitles/apply",
+    {
+      schema: {
+        body: {
+          type: "object",
+          required: ["file_id", "language"],
+          properties: {
+            file_id: { type: "integer", minimum: 1 },
+            language: {
+              type: "string",
+              pattern: "^[a-zA-Z]{2,3}(-[a-zA-Z]{2})?$",
+            },
+          },
+          additionalProperties: false,
+        },
+      },
+      preHandler: auth,
+    },
+    async (request, reply) => {
+      if (!config.opensubtitlesApiKey)
+        return reply.code(503).send({
+          error:
+            "OpenSubtitles is not configured — set VLMP_OPENSUBTITLES_API_KEY (free key at opensubtitles.com/consumers)",
+        });
+      const mediaId = parseIntParam(request.params.mediaId, "mediaId");
+      if (request.user!.role !== "admin" && !isMediaFolderVisible(db, mediaId))
+        return reply.code(404).send({ error: "Not found" });
+      const media = db
+        .prepare("SELECT id FROM media_items WHERE id = ?")
+        .get(mediaId);
+      if (!media) return reply.code(404).send({ error: "Media not found" });
+      try {
+        return await downloadAndPersistSubtitle(
+          db,
+          config,
+          mediaId,
+          request.body.file_id,
+          request.body.language.toLowerCase(),
+        );
+      } catch (err) {
+        if (err instanceof OpenSubtitlesError)
+          return reply.code(502).send({ error: err.message });
+        throw err;
+      }
+    },
+  );
 
   app.post<{ Params: { mediaId: string } }>(
     "/admin/subtitles/:mediaId/extract",

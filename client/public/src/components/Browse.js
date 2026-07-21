@@ -2,10 +2,14 @@ import { h } from "preact";
 import { useState, useEffect, useRef } from "preact/hooks";
 import htm from "htm";
 import { get, getUserRole } from "../api.js";
-import { MediaRow } from "./MediaRow.js";
+import { fetchCategories } from "../categories.js";
 import { MediaCard } from "./MediaCard.js";
+import { ShowCard } from "./ShowCard.js";
 const html = htm.bind(h);
-const CATS = [
+
+// Home shelves that aren't categories. Category shelves are appended from
+// /categories at load time.
+const FIXED_ROWS = [
   {
     key: "continue",
     label: "Continue Watching",
@@ -21,45 +25,27 @@ const CATS = [
     label: "Recently Added",
     endpoint: "/library/recent?limit=20",
   },
-  {
-    key: "movies",
-    label: "Movies",
-    endpoint: "/library/browse?category=movies&limit=20",
-  },
-  {
-    key: "tv",
-    label: "TV Shows",
-    endpoint: "/library/browse?category=tv&limit=20",
-  },
-  {
-    key: "documentaries",
-    label: "Documentaries",
-    endpoint: "/library/browse?category=documentaries&limit=20",
-  },
-  {
-    key: "education",
-    label: "Education & Training",
-    endpoint: "/library/browse?category=education&limit=20",
-  },
-  {
-    key: "other",
-    label: "Other",
-    endpoint: "/library/browse?category=other&limit=20",
-  },
 ];
-const CATEGORY_LABELS = {
-  movies: "Movies",
-  tv: "TV Shows",
-  documentaries: "Documentaries",
-  doc_series: "Documentary Series",
-  education: "Education & Training",
-  other: "Other",
-};
 const PAGE_SIZE = 60;
 
-// Full-category view: wrapping grid of the ENTIRE category with paging —
-// the home page's horizontal 20-item rows are a shelf, not the library.
+// A category's contents = its shows (episodes grouped as one card each) +
+// its loose items (browse with exclude_episodes so nothing appears twice).
+async function loadCategoryContent(slug, limit, offset) {
+  const [shows, items] = await Promise.all([
+    offset === 0 ? get(`/library/shows?category=${slug}`) : Promise.resolve([]),
+    get(
+      `/library/browse?category=${slug}&exclude_episodes=1&limit=${limit}&offset=${offset}`,
+    ),
+  ]);
+  return { shows: shows || [], items: items.items || [], total: items.total };
+}
+
+// Full-category view: shows first, then a wrapping grid of the ENTIRE
+// category with paging — the home page's horizontal rows are a shelf, not
+// the library.
 function CategoryGrid({ category }) {
+  const [cat, setCat] = useState(undefined); // undefined=loading, null=unknown
+  const [shows, setShows] = useState([]);
   const [items, setItems] = useState([]);
   const [total, setTotal] = useState(null);
   const [loading, setLoading] = useState(true);
@@ -72,14 +58,11 @@ function CategoryGrid({ category }) {
     setLoading(true);
     setError("");
     try {
-      const d = await get(
-        `/library/browse?category=${category}&limit=${PAGE_SIZE}&offset=${offset}`,
-      );
+      const d = await loadCategoryContent(category, PAGE_SIZE, offset);
       if (gen !== genRef.current) return; // stale category response
-      setItems((prev) =>
-        offset === 0 ? d.items || [] : prev.concat(d.items || []),
-      );
-      setTotal(d.total ?? (d.items || []).length);
+      if (offset === 0) setShows(d.shows);
+      setItems((prev) => (offset === 0 ? d.items : prev.concat(d.items)));
+      setTotal(d.total ?? d.items.length);
     } catch (err) {
       if (gen === genRef.current)
         setError(err.message || "Failed to load library");
@@ -90,30 +73,56 @@ function CategoryGrid({ category }) {
 
   useEffect(() => {
     const gen = ++genRef.current;
+    setCat(undefined);
+    setShows([]);
     setItems([]);
     setTotal(null);
-    loadPage(0, gen);
+    fetchCategories()
+      .then((cats) => {
+        if (gen !== genRef.current) return;
+        const found = cats.find((c) => c.slug === category) || null;
+        setCat(found);
+        if (found) loadPage(0, gen);
+      })
+      .catch(() => {
+        if (gen !== genRef.current) return;
+        // Category list unavailable — try the browse anyway with the slug as
+        // its own label rather than dead-ending the page.
+        setCat({ slug: category, label: category });
+        loadPage(0, gen);
+      });
   }, [category]);
 
-  const label = CATEGORY_LABELS[category] || category;
+  if (cat === undefined)
+    return html`<div class="browse">
+      <div class="loading">Loading...</div>
+    </div>`;
+  if (cat === null)
+    return html`<div class="browse">
+      <div class="empty">
+        <h2>Page not found</h2>
+        <p>No category named “${category}”.</p>
+        <a href="#/" style=${{ color: "var(--accent)" }}>Go home</a>
+      </div>
+    </div>`;
+
+  const label = cat.label || category;
+  const empty = !loading && shows.length === 0 && items.length === 0;
   return html`<div class="browse">
     <div class="category-header">
       <h1 class="category-title">${label}</h1>
       ${
         total !== null &&
         html`<span class="category-count"
-          >${total} ${total === 1 ? "title" : "titles"}</span
+          >${shows.length > 0 ? `${shows.length} series · ` : ""}${total}
+          ${total === 1 ? "title" : "titles"}</span
         >`
       }
     </div>
     ${error && html`<div class="empty"><h2>${error}</h2></div>`}
-    ${
-      !error &&
-      !loading &&
-      items.length === 0 &&
-      html`<div class="empty"><h2>Nothing in ${label} yet</h2></div>`
-    }
+    ${!error && empty && html`<div class="empty"><h2>Nothing in ${label} yet</h2></div>`}
     <div class="category-grid">
+      ${shows.map((s) => html`<${ShowCard} key=${"show-" + s.id} show=${s} />`)}
       ${items.map((item) => html`<${MediaCard} key=${item.id} item=${item} />`)}
     </div>
     ${loading && html`<div class="loading">Loading...</div>`}
@@ -139,20 +148,51 @@ function HomeRows() {
   const [rows, setRows] = useState([]);
   const [loading, setLoading] = useState(true);
   useEffect(() => {
+    let cancelled = false;
     setLoading(true);
-    Promise.all(
-      CATS.map(async (cat) => {
-        try {
-          const d = await get(cat.endpoint);
-          return { ...cat, items: Array.isArray(d) ? d : d.items || [] };
-        } catch {
-          return { ...cat, items: [] };
-        }
-      }),
-    ).then((r) => {
-      setRows(r.filter((x) => x.items.length > 0));
+    (async () => {
+      let cats = [];
+      try {
+        cats = await fetchCategories();
+      } catch {
+        /* nav also fails loudly; shelves just show the fixed rows */
+      }
+      const defs = [
+        ...FIXED_ROWS.map((r) => ({
+          ...r,
+          load: () =>
+            get(r.endpoint).then((d) => ({
+              items: Array.isArray(d) ? d : d.items || [],
+              shows: [],
+            })),
+        })),
+        ...cats.map((c) => ({
+          key: c.slug,
+          label: c.label,
+          load: () => loadCategoryContent(c.slug, 20, 0),
+        })),
+      ];
+      const results = await Promise.all(
+        defs.map(async (def) => {
+          try {
+            const d = await def.load();
+            const cards = [
+              ...(d.shows || []).map((s) => ({ show: s })),
+              ...(d.items || []).map((i) => ({ item: i })),
+            ].slice(0, 20);
+            return { key: def.key, label: def.label, cards };
+          } catch {
+            return { key: def.key, label: def.label, cards: [] };
+          }
+        }),
+      );
+      if (cancelled) return;
+      setRows(results.filter((r) => r.cards.length > 0));
       setLoading(false);
-    });
+    })();
+    return () => {
+      cancelled = true;
+    };
   }, []);
   if (loading)
     return html`<div class="browse">
@@ -178,7 +218,19 @@ function HomeRows() {
   return html`<div class="browse">
     ${rows.map(
       (r) =>
-        html`<${MediaRow} key=${r.key} label=${r.label} items=${r.items} />`,
+        html`<div class="media-row" key=${r.key}>
+          <h2>${r.label}</h2>
+          <div class="media-row-items">
+            ${r.cards.map((c) =>
+              c.show
+                ? html`<${ShowCard}
+                    key=${"show-" + c.show.id}
+                    show=${c.show}
+                  />`
+                : html`<${MediaCard} key=${c.item.id} item=${c.item} />`,
+            )}
+          </div>
+        </div>`,
     )}
   </div>`;
 }

@@ -1,11 +1,24 @@
 import { h } from "preact";
-import { useState } from "preact/hooks";
+import { useState, useEffect } from "preact/hooks";
 import htm from "htm";
 import { setToken, getUserRole } from "../api.js";
+import { fetchCategories } from "../categories.js";
 import { navigate } from "../router.js";
 const html = htm.bind(h);
 export function Shell({ children }) {
   const [searchVal, setSearchVal] = useState("");
+  const [categories, setCategories] = useState([]);
+  useEffect(() => {
+    let cancelled = false;
+    fetchCategories()
+      .then((cats) => {
+        if (!cancelled) setCategories(cats);
+      })
+      .catch(() => {});
+    return () => {
+      cancelled = true;
+    };
+  }, []);
   function handleSearch(e) {
     e.preventDefault();
     if (searchVal.trim())
@@ -27,10 +40,12 @@ export function Shell({ children }) {
       </div>
       <ul class="nav-links">
         <li><a href="#/" aria-label="Home">Home</a></li>
-        <li><a href="#/movies" aria-label="Movies">Movies</a></li>
-        <li><a href="#/tv" aria-label="TV Shows">TV Shows</a></li>
-        <li><a href="#/documentaries" aria-label="Documentaries">Docs</a></li>
-        <li><a href="#/education" aria-label="Education">Education</a></li>
+        ${categories.map(
+          (c) =>
+            html`<li key=${c.slug}>
+              <a href=${"#/" + c.slug} aria-label=${c.label}>${c.label}</a>
+            </li>`,
+        )}
         <li><a href="#/playlists" aria-label="Playlists">Playlists</a></li>
         <li><a href="#/servers" aria-label="Servers">Servers</a></li>
         ${

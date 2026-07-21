@@ -10,6 +10,13 @@ CREATE TABLE IF NOT EXISTS users (
   role TEXT NOT NULL DEFAULT 'user',
   created_at INTEGER NOT NULL DEFAULT (unixepoch())
 );
+CREATE TABLE IF NOT EXISTS categories (
+  id INTEGER PRIMARY KEY,
+  slug TEXT UNIQUE NOT NULL,
+  label TEXT NOT NULL,
+  kind TEXT NOT NULL CHECK(kind IN ('movie', 'series')),
+  created_at INTEGER NOT NULL DEFAULT (unixepoch())
+);
 CREATE TABLE IF NOT EXISTS library_folders (
   id INTEGER PRIMARY KEY,
   path TEXT UNIQUE NOT NULL,
@@ -67,19 +74,6 @@ CREATE TABLE IF NOT EXISTS episodes (
   media_id INTEGER UNIQUE NOT NULL REFERENCES media_items(id) ON DELETE CASCADE,
   episode_number INTEGER NOT NULL,
   UNIQUE(season_id, episode_number)
-);
-CREATE TABLE IF NOT EXISTS doc_series (
-  id INTEGER PRIMARY KEY,
-  title TEXT NOT NULL,
-  description TEXT,
-  poster_path TEXT,
-  folder_path TEXT UNIQUE NOT NULL
-);
-CREATE TABLE IF NOT EXISTS doc_series_episodes (
-  id INTEGER PRIMARY KEY,
-  series_id INTEGER NOT NULL REFERENCES doc_series(id) ON DELETE CASCADE,
-  media_id INTEGER UNIQUE NOT NULL REFERENCES media_items(id) ON DELETE CASCADE,
-  episode_number INTEGER NOT NULL
 );
 CREATE TABLE IF NOT EXISTS guest_passes (
   id INTEGER PRIMARY KEY,
@@ -213,8 +207,38 @@ function addColumnIfMissing(
     db.exec(`ALTER TABLE ${table} ADD COLUMN ${column} ${definition}`);
 }
 
+// The six built-in categories. Seeded ONCE — only when the categories table
+// itself is being created (fresh install or first boot after the upgrade that
+// introduced it). Never re-seeded after that: a default the admin deleted must
+// stay deleted across restarts.
+const DEFAULT_CATEGORIES: [slug: string, label: string, kind: string][] = [
+  ["movies", "Movies", "movie"],
+  ["tv", "TV Shows", "series"],
+  ["documentaries", "Documentaries", "movie"],
+  ["doc_series", "Documentary Series", "series"],
+  ["education", "Education & Training", "movie"],
+  ["other", "Other", "movie"],
+];
+
 export function initSchema(db: Database.Database): void {
+  const hadCategoriesTable = !!db
+    .prepare(
+      "SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'categories'",
+    )
+    .get();
   db.exec(TABLES);
+  if (!hadCategoriesTable) {
+    const seed = db.prepare(
+      "INSERT INTO categories (slug, label, kind) VALUES (?, ?, ?)",
+    );
+    for (const [slug, label, kind] of DEFAULT_CATEGORIES)
+      seed.run(slug, label, kind);
+  }
+  // doc_series never had a writer — superseded by generalized series linking
+  // (any category can hold shows now). Empty everywhere, safe to drop.
+  db.exec(
+    "DROP TABLE IF EXISTS doc_series_episodes; DROP TABLE IF EXISTS doc_series;",
+  );
   // Migrations: existing libraries default to visible + searchable, preserving
   // pre-gate behavior. New installs get these from the CREATE above.
   addColumnIfMissing(

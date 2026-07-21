@@ -2,17 +2,9 @@ import { h } from "preact";
 import { useState, useEffect, useRef } from "preact/hooks";
 import htm from "htm";
 import { get, post, del, patch, getUserRole, getUserId } from "../api.js";
+import { fetchCategories, invalidateCategories } from "../categories.js";
 import { FolderPicker } from "./FolderPicker.js";
 const html = htm.bind(h);
-
-const CATEGORIES = [
-  "movies",
-  "tv",
-  "documentaries",
-  "doc_series",
-  "education",
-  "other",
-];
 
 export function Settings() {
   const [folders, setFolders] = useState(null);
@@ -36,6 +28,12 @@ export function Settings() {
   const mountedRef = useRef(true);
   const [metaScan, setMetaScan] = useState(null);
   const [metaError, setMetaError] = useState("");
+  const [categories, setCategories] = useState([]);
+  const [catError, setCatError] = useState("");
+  const [newCatLabel, setNewCatLabel] = useState("");
+  const [newCatKind, setNewCatKind] = useState("movie");
+  const [catPending, setCatPending] = useState(false);
+  const [busyCat, setBusyCat] = useState(null);
   const selfId = getUserId();
 
   // Every setState below an await must check mountedRef — a resolve after
@@ -66,10 +64,26 @@ export function Settings() {
     }
   }
 
+  async function loadCategories(force) {
+    if (force) invalidateCategories();
+    try {
+      const cats = await fetchCategories();
+      if (!mountedRef.current) return;
+      setCategories(cats);
+      // Keep the Add Folder select valid if the selected category was deleted.
+      if (cats.length > 0 && !cats.some((c) => c.slug === category))
+        setCategory(cats[0].slug);
+    } catch (err) {
+      if (mountedRef.current)
+        setCatError(err.message || "Failed to load categories");
+    }
+  }
+
   useEffect(() => {
     mountedRef.current = true;
     load();
     loadUsers();
+    loadCategories();
     loadMetaStatus(); // a backfill may already be running from a prior visit
     return () => {
       mountedRef.current = false;
@@ -100,6 +114,48 @@ export function Settings() {
     } catch (err) {
       if (mountedRef.current)
         setMetaError(err.message || "Failed to start metadata fetch");
+    }
+  }
+
+  async function addCategory(e) {
+    e.preventDefault();
+    if (!newCatLabel.trim() || catPending) return;
+    setCatPending(true);
+    setCatError("");
+    try {
+      await post("/admin/categories", {
+        label: newCatLabel.trim(),
+        kind: newCatKind,
+      });
+      if (!mountedRef.current) return;
+      setNewCatLabel("");
+      await loadCategories(true);
+    } catch (err) {
+      if (mountedRef.current)
+        setCatError(err.message || "Failed to create category");
+    } finally {
+      if (mountedRef.current) setCatPending(false);
+    }
+  }
+
+  async function removeCategory(cat) {
+    if (
+      !confirm(
+        `Delete category "${cat.label}"? Folders must be reassigned first if any still use it.`,
+      )
+    )
+      return;
+    setBusyCat(cat.id);
+    setCatError("");
+    try {
+      await del(`/admin/categories/${cat.id}`);
+      if (!mountedRef.current) return;
+      await loadCategories(true);
+    } catch (err) {
+      if (mountedRef.current)
+        setCatError(err.message || "Failed to delete category");
+    } finally {
+      if (mountedRef.current) setBusyCat(null);
     }
   }
 
@@ -369,20 +425,20 @@ export function Settings() {
               disabled=${metaScan?.inProgress}
             >
               ${
-              metaScan?.inProgress
-                ? `Fetching metadata… ${metaScan.done}/${metaScan.total}`
-                : "Fetch metadata for library"
-            }
+                metaScan?.inProgress
+                  ? `Fetching metadata… ${metaScan.done}/${metaScan.total}`
+                  : "Fetch metadata for library"
+              }
             </button>
             ${
-            metaScan &&
-            !metaScan.inProgress &&
-            metaScan.total > 0 &&
-            html`<span class="settings-note inline">
-              Last run: ${metaScan.matched} matched of ${metaScan.total}
-              ${metaScan.failed > 0 ? ` (${metaScan.failed} errors)` : ""}
-            </span>`
-          }
+              metaScan &&
+              !metaScan.inProgress &&
+              metaScan.total > 0 &&
+              html`<span class="settings-note inline">
+                Last run: ${metaScan.matched} matched of ${metaScan.total}
+                ${metaScan.failed > 0 ? ` (${metaScan.failed} errors)` : ""}
+              </span>`
+            }
             ${metaError && html`<span class="settings-error">${metaError}</span>`}
           </div>
           <p class="settings-note">
@@ -424,8 +480,8 @@ export function Settings() {
             value=${category}
             onChange=${(e) => setCategory(e.target.value)}
           >
-            ${CATEGORIES.map(
-              (c) => html`<option value=${c}>${c.replace("_", " ")}</option>`,
+            ${categories.map(
+              (c) => html`<option value=${c.slug}>${c.label}</option>`,
             )}
           </select>
         </div>
@@ -451,6 +507,87 @@ export function Settings() {
           onCancel=${() => setPickerOpen(false)}
         />`
       }
+    </section>
+
+    <section class="settings-section" aria-labelledby="categories-label">
+      <div class="settings-label" id="categories-label">Categories</div>
+      ${
+        catError &&
+        html`<div class="settings-error" role="alert">${catError}</div>`
+      }
+      ${
+        categories.length > 0 &&
+        html`<table class="settings-table">
+          <thead>
+            <tr>
+              <th scope="col">Name</th>
+              <th scope="col">URL</th>
+              <th scope="col">Content</th>
+              <th scope="col"><span class="sr-only">Actions</span></th>
+            </tr>
+          </thead>
+          <tbody>
+            ${categories.map(
+              (c) =>
+                html`<tr key=${c.id}>
+                  <td data-label="Name">${c.label}</td>
+                  <td class="folder-category" data-label="URL">#/${c.slug}</td>
+                  <td class="folder-category" data-label="Content">
+                    ${c.kind === "series" ? "series (episodes group into shows)" : "single titles"}
+                  </td>
+                  <td>
+                    <div class="folder-actions">
+                      <button
+                        class="lum-btn danger"
+                        onClick=${() => removeCategory(c)}
+                        disabled=${busyCat === c.id}
+                        aria-label=${`Delete category ${c.label}`}
+                      >
+                        Delete
+                      </button>
+                    </div>
+                  </td>
+                </tr>`,
+            )}
+          </tbody>
+        </table>`
+      }
+      <form class="settings-form" onSubmit=${addCategory}>
+        <div class="settings-field grow">
+          <label for="new-cat-label">New category name</label>
+          <input
+            id="new-cat-label"
+            type="text"
+            placeholder="Concerts"
+            value=${newCatLabel}
+            onInput=${(e) => setNewCatLabel(e.target.value)}
+            maxlength="80"
+            required
+          />
+        </div>
+        <div class="settings-field">
+          <label for="new-cat-kind">Content type</label>
+          <select
+            id="new-cat-kind"
+            value=${newCatKind}
+            onChange=${(e) => setNewCatKind(e.target.value)}
+          >
+            <option value="movie">single titles</option>
+            <option value="series">series</option>
+          </select>
+        </div>
+        <button class="lum-btn" type="submit" disabled=${catPending}>
+          ${catPending ? "Creating…" : "Add Category"}
+        </button>
+      </form>
+      <p class="settings-note">
+        Categories appear in the nav and as Home shelves. "Series" categories
+        group files into shows by season; "single titles" categories still
+        auto-detect any Season/Series folders or S01E02-style names inside them.
+        The built-in categories can be deleted like any other once no folder
+        uses them. Deleting a category never touches media — reassign its
+        folders first.
+      </p>
     </section>
 
     <section class="settings-section" aria-labelledby="users-label">

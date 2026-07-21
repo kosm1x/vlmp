@@ -1,10 +1,11 @@
 import type Database from "better-sqlite3";
 import { existsSync } from "node:fs";
-import { resolve } from "node:path";
+import { join, resolve } from "node:path";
 import type { Config } from "../config.js";
 import { discoverMedia } from "../scanner/discover.js";
 import { probeFile } from "../scanner/probe.js";
-import { classifyByFolder, type MediaCategory } from "../scanner/classify.js";
+import { classifyMedia, type ClassifiedMedia } from "../scanner/classify.js";
+import { getCategoryBySlug } from "./categories.js";
 import {
   matchAndApplyMetadata,
   matchAndApplyShowMetadata,
@@ -15,7 +16,7 @@ import { persistSubtitles } from "../subtitles/service.js";
 export interface LibraryFolder {
   id: number;
   path: string;
-  category: MediaCategory;
+  category: string;
   scan_status: string;
   last_scanned: number | null;
   is_visible: number;
@@ -52,7 +53,7 @@ export interface MediaItem {
 export function addLibraryFolder(
   db: Database.Database,
   path: string,
-  category: MediaCategory,
+  category: string,
 ): LibraryFolder {
   // Normalize before storing: folder uniqueness is an exact-string UNIQUE, so
   // `C:\Media` vs `C:/Media/` (or a trailing slash on POSIX) would otherwise
@@ -156,19 +157,32 @@ export async function scanLibraryFolder(
   let pruned = 0;
   try {
     const files = await discoverMedia(folder.path);
+    // Folder rows can only reference existing categories (creation is
+    // validated), but a legacy slug with no row degrades to plain movie-kind.
+    const category = getCategoryBySlug(db, folder.category) ?? {
+      slug: folder.category,
+      kind: "movie" as const,
+    };
     const insertMedia = db.prepare(
       "INSERT OR IGNORE INTO media_items (library_folder_id, type, file_path, file_size, title, sort_title, year, codec_video, codec_audio, resolution_width, resolution_height, bitrate, duration, audio_tracks) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
     );
     for (const file of files) {
+      const classified = classifyMedia(file.path, folder.path, category);
       const existing = db
-        .prepare("SELECT id FROM media_items WHERE file_path = ?")
-        .get(file.path);
-      if (existing) continue;
-      const classified = classifyByFolder(
-        file.path,
-        folder.path,
-        folder.category as MediaCategory,
-      );
+        .prepare(
+          "SELECT id, type, title, year FROM media_items WHERE file_path = ?",
+        )
+        .get(file.path) as
+        | { id: number; type: string; title: string; year: number | null }
+        | undefined;
+      if (existing) {
+        // Backfill: classification rules changed (or the folder's category
+        // did) — re-derive from the source path and migrate the stored row.
+        // Metadata enrichment is safe: TMDb writes description/poster/genres,
+        // never title/year, so re-deriving those clobbers nothing.
+        reclassifyExistingItem(db, existing, file.path, classified, folder);
+        continue;
+      }
       let probe = null;
       try {
         probe = await probeFile(file.path, config);
@@ -234,29 +248,23 @@ export async function scanLibraryFolder(
         }
       }
 
-      if (
-        classified.type === "episode" &&
-        classified.showTitle &&
-        folder.category === "tv"
-      ) {
-        linkEpisodeToShow(db, file.path, classified);
+      if (classified.type === "episode" && classified.showTitle) {
+        const showId = linkEpisodeToShow(db, file.path, folder, classified);
         // Match show metadata from TMDb (non-fatal)
-        if (config.tmdbApiKey) {
-          const show = db
-            .prepare("SELECT id FROM tv_shows WHERE title = ?")
-            .get(classified.showTitle) as { id: number } | undefined;
-          if (show) {
-            try {
-              await matchAndApplyShowMetadata(db, show.id, config);
-            } catch {
-              /* non-fatal */
-            }
+        if (showId && config.tmdbApiKey) {
+          try {
+            await matchAndApplyShowMetadata(db, showId, config);
+          } catch {
+            /* non-fatal */
           }
         }
       }
     }
     // Empty trash: drop rows for files removed/renamed since the last scan.
     if (config.emptyTrashOnScan) pruned = pruneMissingFiles(db, folder.id);
+    // Reclassification can move episodes between shows (and legacy shows were
+    // keyed by title, not folder) — sweep whatever is left empty.
+    sweepOrphanShows(db);
     const now = Math.floor(Date.now() / 1000);
     db.prepare(
       "UPDATE library_folders SET scan_status = ?, last_scanned = ? WHERE id = ?",
@@ -309,23 +317,40 @@ export function pruneMissingFiles(
   return missing.length;
 }
 
+// Show identity is the show's real directory (library-relative root resolved
+// against the folder path) — two shows with the same title in different
+// folders stay distinct, and renaming a title doesn't duplicate the show.
+// Legacy rows stored the TITLE in folder_path; the episode upsert migrates
+// their episodes here and sweepOrphanShows removes the emptied legacy row.
+function showFolderPath(
+  folder: LibraryFolder,
+  classified: ClassifiedMedia,
+): string {
+  if (classified.showRootRel === null)
+    // Bare file in the library root: no directory to key on. Synthetic id,
+    // scoped to the folder, that can't collide with a real absolute path.
+    return `title:${folder.id}:${classified.showTitle}`;
+  if (classified.showRootRel === "") return folder.path;
+  return join(folder.path, classified.showRootRel);
+}
+
 function linkEpisodeToShow(
   db: Database.Database,
   filePath: string,
-  classified: {
-    showTitle: string | null;
-    seasonNumber: number | null;
-    episodeNumber: number | null;
-  },
-): void {
-  if (!classified.showTitle || classified.episodeNumber == null) return;
-  db.prepare(
-    "INSERT OR IGNORE INTO tv_shows (title, folder_path) VALUES (?, ?)",
-  ).run(classified.showTitle, classified.showTitle);
+  folder: LibraryFolder,
+  classified: ClassifiedMedia,
+): number | null {
+  if (!classified.showTitle || classified.episodeNumber == null) return null;
   const show = db
-    .prepare("SELECT id FROM tv_shows WHERE title = ?")
-    .get(classified.showTitle) as { id: number } | undefined;
-  if (!show) return;
+    .prepare(
+      "INSERT INTO tv_shows (title, year, folder_path) VALUES (?, ?, ?) ON CONFLICT(folder_path) DO UPDATE SET title = excluded.title, year = COALESCE(excluded.year, tv_shows.year) RETURNING id",
+    )
+    .get(
+      classified.showTitle,
+      classified.showYear,
+      showFolderPath(folder, classified),
+    ) as { id: number } | undefined;
+  if (!show) return null;
   const seasonNum = classified.seasonNumber || 1;
   db.prepare(
     "INSERT OR IGNORE INTO seasons (show_id, season_number) VALUES (?, ?)",
@@ -333,14 +358,78 @@ function linkEpisodeToShow(
   const season = db
     .prepare("SELECT id FROM seasons WHERE show_id = ? AND season_number = ?")
     .get(show.id, seasonNum) as { id: number } | undefined;
-  if (!season) return;
+  if (!season) return show.id;
   const media = db
     .prepare("SELECT id FROM media_items WHERE file_path = ?")
     .get(filePath) as { id: number } | undefined;
-  if (!media) return;
+  if (!media) return show.id;
+  try {
+    // Upsert on media_id so reclassification MOVES an episode to its new
+    // show/season instead of leaving it stuck on the legacy link.
+    db.prepare(
+      "INSERT INTO episodes (season_id, media_id, episode_number) VALUES (?, ?, ?) ON CONFLICT(media_id) DO UPDATE SET season_id = excluded.season_id, episode_number = excluded.episode_number",
+    ).run(season.id, media.id, classified.episodeNumber);
+  } catch (err) {
+    // UNIQUE(season_id, episode_number): a second copy of the same episode
+    // (different quality/container) — keep the first one linked. Anything
+    // else (BUSY, IO) must not be silent: the episode would just vanish
+    // from the show page with no trace.
+    const code = (err as { code?: string }).code || "";
+    if (!code.startsWith("SQLITE_CONSTRAINT"))
+      console.warn(
+        `[scan] episode link failed for media ${media.id}: ${err instanceof Error ? err.message : err}`,
+      );
+  }
+  return show.id;
+}
+
+// Backfill for rows scanned under older classification rules: re-derive
+// type/title/year from the file path and repair the episode link. Runs on
+// every rescan; a no-op when nothing changed.
+function reclassifyExistingItem(
+  db: Database.Database,
+  existing: { id: number; type: string; title: string; year: number | null },
+  filePath: string,
+  classified: ClassifiedMedia,
+  folder: LibraryFolder,
+): void {
+  // Any parse difference (not just a type flip) gets re-derived: classifier
+  // fixes must heal rows stored by older versions. TMDb never writes
+  // title/year (only description/poster/genres/rating), so this clobbers
+  // nothing enrichment owns.
+  if (
+    existing.type !== classified.type ||
+    existing.title !== classified.title ||
+    existing.year !== classified.year
+  ) {
+    const sortTitle = classified.title
+      .replace(/^(?:the|a|an)\s+/i, "")
+      .toLowerCase();
+    db.prepare(
+      "UPDATE media_items SET type = ?, title = ?, sort_title = ?, year = ?, updated_at = unixepoch() WHERE id = ?",
+    ).run(
+      classified.type,
+      classified.title,
+      sortTitle,
+      classified.year,
+      existing.id,
+    );
+  }
+  if (classified.type === "episode") {
+    linkEpisodeToShow(db, filePath, folder, classified);
+  } else if (existing.type === "episode") {
+    db.prepare("DELETE FROM episodes WHERE media_id = ?").run(existing.id);
+  }
+}
+
+// Delete seasons/shows that no longer have any episodes.
+export function sweepOrphanShows(db: Database.Database): void {
   db.prepare(
-    "INSERT OR IGNORE INTO episodes (season_id, media_id, episode_number) VALUES (?, ?, ?)",
-  ).run(season.id, media.id, classified.episodeNumber);
+    "DELETE FROM seasons WHERE id NOT IN (SELECT DISTINCT season_id FROM episodes)",
+  ).run();
+  db.prepare(
+    "DELETE FROM tv_shows WHERE id NOT IN (SELECT DISTINCT show_id FROM seasons)",
+  ).run();
 }
 
 export function browseLibrary(
@@ -352,6 +441,7 @@ export function browseLibrary(
     offset?: number;
     search?: string;
     includeHidden?: boolean;
+    excludeEpisodes?: boolean;
   },
 ): { items: MediaItem[]; total: number } {
   const conditions: string[] = [];
@@ -360,6 +450,12 @@ export function browseLibrary(
     conditions.push("mi.type = ?");
     params.push(options.type);
   }
+  // Grid/shelf views list shows as single cards, so hide exactly the items
+  // reachable through a show page. Keyed on the episodes LINK, not on
+  // type='episode': an unlinkable episode (no parseable number) must stay
+  // visible in the flat grid or it would be reachable nowhere.
+  if (options.excludeEpisodes)
+    conditions.push("mi.id NOT IN (SELECT media_id FROM episodes)");
   if (options.category) {
     conditions.push("lf.category = ?");
     params.push(options.category);
@@ -420,20 +516,36 @@ export function getRecentlyAdded(
 export function getTVShows(
   db: Database.Database,
   includeHidden: boolean = false,
+  category?: string,
 ) {
   // A show is visible when at least one of its episodes' media is in a visible
   // folder; hidden-only shows drop out via HAVING episode_count > 0.
-  const join = includeHidden
+  const epJoin = includeHidden
     ? "LEFT JOIN episodes e ON e.season_id = s.id"
     : `LEFT JOIN episodes e ON e.season_id = s.id AND e.media_id IN (SELECT id FROM media_items WHERE library_folder_id IN (${visibleFolderSubquery(
         "view",
       )}))`;
   const having = includeHidden ? "" : "HAVING episode_count > 0";
+  const params: unknown[] = [];
+  let categoryFilter = "";
+  if (category) {
+    categoryFilter = `WHERE EXISTS (SELECT 1 FROM episodes e2 JOIN seasons s2 ON e2.season_id = s2.id JOIN media_items m2 ON m2.id = e2.media_id JOIN library_folders lf2 ON lf2.id = m2.library_folder_id WHERE s2.show_id = ts.id AND lf2.category = ?)`;
+    params.push(category);
+  }
+  // first_media_id: a stable episode to borrow a frame-grab thumb from when
+  // the show has no TMDb poster. Same visibility gate as epJoin — a show
+  // spanning a visible and a hidden folder must not hand a non-admin a
+  // hidden episode's id (read_gate_every_surface).
+  const firstMediaGate = includeHidden
+    ? ""
+    : `AND e3.media_id IN (SELECT id FROM media_items WHERE library_folder_id IN (${visibleFolderSubquery("view")}))`;
   return db
     .prepare(
-      `SELECT ts.*, COUNT(DISTINCT s.id) as season_count, COUNT(e.id) as episode_count FROM tv_shows ts LEFT JOIN seasons s ON s.show_id = ts.id ${join} GROUP BY ts.id ${having} ORDER BY ts.title`,
+      `SELECT ts.*, COUNT(DISTINCT s.id) as season_count, COUNT(e.id) as episode_count,
+        (SELECT e3.media_id FROM episodes e3 JOIN seasons s3 ON e3.season_id = s3.id WHERE s3.show_id = ts.id ${firstMediaGate} ORDER BY s3.season_number, e3.episode_number LIMIT 1) as first_media_id
+       FROM tv_shows ts LEFT JOIN seasons s ON s.show_id = ts.id ${epJoin} ${categoryFilter} GROUP BY ts.id ${having} ORDER BY ts.title`,
     )
-    .all();
+    .all(...params);
 }
 
 // True if a show has at least one episode in a visible folder — the access
@@ -466,10 +578,36 @@ export function getTVShowDetail(
     : `AND e.media_id IN (SELECT id FROM media_items WHERE library_folder_id IN (${visibleFolderSubquery(
         "view",
       )}))`;
-  const seasons = db
+  const rows = db
     .prepare(
       `SELECT s.*, json_group_array(json_object('id', e.id, 'episode_number', e.episode_number, 'media_id', e.media_id, 'title', mi.title, 'duration', mi.duration, 'poster_path', mi.poster_path)) as episodes FROM seasons s LEFT JOIN episodes e ON e.season_id = s.id ${epGate} LEFT JOIN media_items mi ON mi.id = e.media_id WHERE s.show_id = ? GROUP BY s.id ORDER BY s.season_number`,
     )
-    .all(showId);
+    .all(showId) as ({ episodes: string } & Record<string, unknown>)[];
+  // json_group_array returns a JSON STRING per row, and a season whose
+  // episodes were all filtered by the gate yields [{"id":null,...}] — parse
+  // and drop those so clients get real arrays with real episodes only.
+  const seasons = rows
+    .map((row) => {
+      let episodes: {
+        id: number | null;
+        episode_number: number;
+        media_id: number;
+        title: string | null;
+        duration: number | null;
+        poster_path: string | null;
+      }[] = [];
+      try {
+        episodes = JSON.parse(row.episodes);
+      } catch {
+        /* defensive: malformed aggregate row */
+      }
+      return {
+        ...row,
+        episodes: episodes
+          .filter((e) => e.id !== null)
+          .sort((a, b) => a.episode_number - b.episode_number),
+      };
+    })
+    .filter((s) => s.episodes.length > 0 || includeHidden);
   return { show, seasons };
 }

@@ -15,10 +15,32 @@ export function MediaDetail({ id, serverId }) {
   const [error, setError] = useState("");
   const [preference, setPreference] = useState(null);
   const [similar, setSimilar] = useState([]);
+  const [subsLoaded, setSubsLoaded] = useState(false);
+  const [osOpen, setOsOpen] = useState(false);
+  const [osLangs, setOsLangs] = useState("en,es");
+  const [osResults, setOsResults] = useState(null);
+  const [osBusy, setOsBusy] = useState(false);
+  const [osApplying, setOsApplying] = useState(null);
+  const [osError, setOsError] = useState("");
+  const [osNotice, setOsNotice] = useState("");
 
   const isRemote = !!serverId;
   useEffect(() => {
     let cancelled = false;
+    // This instance is REUSED across navigations (similar-titles links) — any
+    // OpenSubtitles state left over would apply title A's file_id to title B,
+    // and stale media/similar would render title A's page under B's id.
+    setMedia(null);
+    setSimilar([]);
+    setPreference(null);
+    setError("");
+    setSubtitles([]);
+    setSubsLoaded(false);
+    setOsOpen(false);
+    setOsResults(null);
+    setOsApplying(null);
+    setOsError("");
+    setOsNotice("");
     const mediaUrl = isRemote
       ? `/federation/servers/${serverId}/media/${id}`
       : `/library/${id}`;
@@ -32,7 +54,9 @@ export function MediaDetail({ id, serverId }) {
     if (!isRemote) {
       get(`/subtitles/${id}`)
         .then((d) => {
-          if (!cancelled) setSubtitles(d);
+          if (cancelled) return;
+          setSubtitles(d);
+          setSubsLoaded(true);
         })
         .catch(() => {});
       get("/playlists")
@@ -70,6 +94,46 @@ export function MediaDetail({ id, serverId }) {
       }
     } catch (e) {
       alert(e.message);
+    }
+  }
+
+  async function searchOpenSubtitles() {
+    setOsBusy(true);
+    setOsError("");
+    setOsNotice("");
+    setOsResults(null);
+    try {
+      const d = await get(
+        `/subtitles/${id}/opensubtitles/search?languages=${encodeURIComponent(osLangs)}`,
+      );
+      setOsResults(d.results || []);
+    } catch (e) {
+      setOsError(e.message || "Search failed");
+    } finally {
+      setOsBusy(false);
+    }
+  }
+
+  async function applyOpenSubtitle(result) {
+    setOsApplying(result.file_id);
+    setOsError("");
+    try {
+      const d = await post(`/subtitles/${id}/opensubtitles/apply`, {
+        file_id: result.file_id,
+        language: result.language,
+      });
+      const subs = await get(`/subtitles/${id}`);
+      setSubtitles(subs);
+      setOsNotice(
+        `Applied ${result.language.toUpperCase()} subtitles — available on next play${
+          d.remaining != null ? ` (${d.remaining} downloads left today)` : ""
+        }`,
+      );
+      setOsResults(null);
+    } catch (e) {
+      setOsError(e.message || "Failed to apply subtitle");
+    } finally {
+      setOsApplying(null);
     }
   }
 
@@ -167,6 +231,98 @@ export function MediaDetail({ id, serverId }) {
           }
         </div>
         ${
+          !isRemote &&
+          subsLoaded &&
+          html`<div class="detail-cc-row">
+            <span
+              class=${`detail-cc-chip${subtitles.length === 0 ? " none" : ""}`}
+            >
+              ${
+                subtitles.length > 0
+                  ? `Subtitles: ${[
+                      ...new Set(
+                        subtitles.map((s) =>
+                          (s.language || s.label || "?").toUpperCase(),
+                        ),
+                      ),
+                    ].join(", ")}`
+                  : "No subtitles"
+              }
+            </span>
+            <button
+              class="detail-btn detail-cc-btn"
+              onClick=${() => {
+                setOsOpen(!osOpen);
+                setOsError("");
+                setOsNotice("");
+              }}
+            >
+              ${osOpen ? "Close search" : "Search OpenSubtitles"}
+            </button>
+          </div>`
+        }
+        ${
+          !isRemote &&
+          osOpen &&
+          html`<div class="detail-os-panel">
+            <div class="detail-os-controls">
+              <input
+                type="text"
+                value=${osLangs}
+                onInput=${(e) => setOsLangs(e.target.value)}
+                placeholder="en,es"
+                aria-label="Subtitle languages (comma-separated codes)"
+              />
+              <button
+                class="lum-btn"
+                onClick=${searchOpenSubtitles}
+                disabled=${osBusy}
+              >
+                ${osBusy ? "Searching…" : "Search"}
+              </button>
+            </div>
+            ${osError && html`<div class="detail-os-error">${osError}</div>`}
+            ${osNotice && html`<div class="detail-os-notice">${osNotice}</div>`}
+            ${
+              osResults !== null &&
+              osResults.length === 0 &&
+              html`<div class="detail-os-empty">
+                No results — try other languages or check the title match.
+              </div>`
+            }
+            ${
+              osResults !== null &&
+              osResults.length > 0 &&
+              html`<div class="detail-os-results">
+                ${osResults.map(
+                  (r) =>
+                    html`<div class="detail-os-result" key=${r.file_id}>
+                      <span class="detail-os-lang"
+                        >${r.language.toUpperCase()}</span
+                      >
+                      <span class="detail-os-name"
+                        >${r.release || r.file_name}${
+                          r.hearing_impaired ? " · HI" : ""
+                        }</span
+                      >
+                      <span class="detail-os-downloads"
+                        >${r.download_count}
+                        ↓${r.from_trusted ? " · trusted" : ""}</span
+                      >
+                      <button
+                        class="lum-btn"
+                        disabled=${osApplying !== null}
+                        onClick=${() => applyOpenSubtitle(r)}
+                      >
+                        ${osApplying === r.file_id ? "Applying…" : "Apply"}
+                      </button>
+                    </div>`,
+                )}
+              </div>`
+            }
+          </div>`
+        }
+        ${
           showPlaylistPicker &&
           html`<div class="detail-playlist-picker">
             ${
@@ -182,18 +338,6 @@ export function MediaDetail({ id, serverId }) {
                       </div>`,
                   )
             }
-          </div>`
-        }
-        ${
-          subtitles.length > 0 &&
-          html`<div class="detail-subtitles">
-            <h3>Subtitles</h3>
-            ${subtitles.map(
-              (s) =>
-                html`<span class="detail-subtitle-tag"
-                  >${s.label || s.language || "Unknown"}</span
-                >`,
-            )}
           </div>`
         }
       </div>

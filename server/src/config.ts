@@ -11,6 +11,7 @@ export interface Config {
   jwtSecret: string;
   jwtExpiresIn: string;
   tmdbApiKey: string;
+  opensubtitlesApiKey: string;
   transcodeTmpDir: string;
   subtitleDir: string;
   serverName: string;
@@ -175,6 +176,10 @@ export function loadConfig(): Config {
     jwtSecret: loadJwtSecret(),
     jwtExpiresIn: process.env.VLMP_JWT_EXPIRES_IN || "24h",
     tmdbApiKey,
+    // Optional: enables searching/downloading subtitles from opensubtitles.com
+    // (free key at opensubtitles.com/consumers). Absent = the feature reports
+    // itself unconfigured; nothing else degrades.
+    opensubtitlesApiKey: process.env.VLMP_OPENSUBTITLES_API_KEY || "",
     transcodeTmpDir: resolve(dataDir, "transcode"),
     subtitleDir: resolve(dataDir, "subtitles"),
     serverName: process.env.VLMP_SERVER_NAME || "VLMP",

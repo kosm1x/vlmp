@@ -41,7 +41,9 @@ If that scope fits how you actually watch, welcome.
 - **Adaptive bitrate streaming** — On-the-fly HLS transcoding via FFmpeg (1080p/720p/480p/360p)
 - **Direct play** — Zero-transcode for browser-compatible formats (H.264 MP4, WebM, etc.)
 - **Smart library scanning** — Recursive discovery with automatic classification (movies, TV, documentaries, education)
-- **TV show hierarchy** — Automatic season/episode detection from filenames (`S01E01`, `1x01`)
+- **Custom categories** — Create/delete your own nav categories (defaults deletable too); each is "single titles" or "series"
+- **Series everywhere** — Season/episode detection from filenames (`S01E01`, `1x01`) and `Season N`/`Series N`/`Temporada N` folders, in ANY category — a Docs library can mix single documentaries with doc series; episodes group into show pages with per-season episode lists
+- **OpenSubtitles integration** — Subtitle availability shown on every detail page; search and apply subtitles from opensubtitles.com in two clicks (free API key required)
 - **Watch progress** — Resume where you left off, "Continue Watching" row
 - **Guest passes** — Share a single item with time-limited, view-limited codes
 - **Closed-membership auth** — First registration bootstraps the admin, then registration closes; admin provisions accounts; per-request role re-check for instant revocation
@@ -101,14 +103,15 @@ Native TLS inside VLMP is on the roadmap but not shipped; today, terminate TLS a
 
 All configuration is via environment variables. The important ones:
 
-| Variable            | Default                     | Description                                           |
-| ------------------- | --------------------------- | ----------------------------------------------------- |
-| `VLMP_PORT`         | `8080`                      | HTTP server port                                      |
-| `VLMP_DATA_DIR`     | `./data`                    | Database + transcode cache                            |
-| `VLMP_JWT_SECRET`   | `vlmp-dev-secret-change-me` | **Change this in production** (or use `_SECRET_FILE`) |
-| `VLMP_TMDB_API_KEY` | _(empty)_                   | TMDb key for metadata enrichment                      |
-| `VLMP_SERVER_NAME`  | `VLMP`                      | Display name in federation                            |
-| `VLMP_PUBLIC_URL`   | _(empty)_                   | Public URL for federation linking                     |
+| Variable                     | Default                     | Description                                           |
+| ---------------------------- | --------------------------- | ----------------------------------------------------- |
+| `VLMP_PORT`                  | `8080`                      | HTTP server port                                      |
+| `VLMP_DATA_DIR`              | `./data`                    | Database + transcode cache                            |
+| `VLMP_JWT_SECRET`            | `vlmp-dev-secret-change-me` | **Change this in production** (or use `_SECRET_FILE`) |
+| `VLMP_TMDB_API_KEY`          | _(empty)_                   | TMDb key for metadata enrichment                      |
+| `VLMP_OPENSUBTITLES_API_KEY` | _(empty)_                   | opensubtitles.com key for subtitle search/download    |
+| `VLMP_SERVER_NAME`           | `VLMP`                      | Display name in federation                            |
+| `VLMP_PUBLIC_URL`            | _(empty)_                   | Public URL for federation linking                     |
 
 The full list (transcode limits, free-disk floor, scheduled backups, x264 preset, empty-trash-on-scan) is documented in [`.env.example`](.env.example).
 
