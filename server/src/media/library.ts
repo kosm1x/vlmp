@@ -144,17 +144,24 @@ export function removeLibraryFolder(
   return remove() as boolean;
 }
 
+// Sample/trailer filter: release folders ship 30-60s "sample" clips next to
+// the real file. Anything with a KNOWN duration under this floor is neither
+// inserted nor enriched; an unknown duration (probe failed, or container
+// reports 0) is NOT treated as short — never drop media on missing evidence.
+export const MIN_DURATION_SECONDS = 120;
+
 export async function scanLibraryFolder(
   db: Database.Database,
   folder: LibraryFolder,
   config: Config,
-): Promise<{ added: number; pruned: number }> {
+): Promise<{ added: number; pruned: number; skippedShort: number }> {
   db.prepare("UPDATE library_folders SET scan_status = ? WHERE id = ?").run(
     "scanning",
     folder.id,
   );
   let added = 0;
   let pruned = 0;
+  let skippedShort = 0;
   try {
     const files = await discoverMedia(folder.path);
     // Folder rows can only reference existing categories (creation is
@@ -170,12 +177,30 @@ export async function scanLibraryFolder(
       const classified = classifyMedia(file.path, folder.path, category);
       const existing = db
         .prepare(
-          "SELECT id, type, title, year FROM media_items WHERE file_path = ?",
+          "SELECT id, type, title, year, duration FROM media_items WHERE file_path = ?",
         )
         .get(file.path) as
-        | { id: number; type: string; title: string; year: number | null }
+        | {
+            id: number;
+            type: string;
+            title: string;
+            year: number | null;
+            duration: number | null;
+          }
         | undefined;
       if (existing) {
+        // Backfill: rows stored before the short-file filter existed get
+        // pruned on rescan (FK cascades clean episodes/progress/playlists;
+        // orphaned shows are swept below).
+        if (
+          existing.duration !== null &&
+          existing.duration > 0 &&
+          existing.duration < MIN_DURATION_SECONDS
+        ) {
+          db.prepare("DELETE FROM media_items WHERE id = ?").run(existing.id);
+          skippedShort++;
+          continue;
+        }
         // Backfill: classification rules changed (or the folder's category
         // did) — re-derive from the source path and migrate the stored row.
         // Metadata enrichment is safe: TMDb writes description/poster/genres,
@@ -188,6 +213,16 @@ export async function scanLibraryFolder(
         probe = await probeFile(file.path, config);
       } catch {
         /* skip */
+      }
+      // Short file = sample/trailer: don't insert, don't TMDb-match, don't
+      // extract subtitles. Only a POSITIVE short duration counts as evidence.
+      if (
+        probe &&
+        probe.duration > 0 &&
+        probe.duration < MIN_DURATION_SECONDS
+      ) {
+        skippedShort++;
+        continue;
       }
       const sortTitle = classified.title
         .replace(/^(?:the|a|an)\s+/i, "")
@@ -265,6 +300,10 @@ export async function scanLibraryFolder(
     // Reclassification can move episodes between shows (and legacy shows were
     // keyed by title, not folder) — sweep whatever is left empty.
     sweepOrphanShows(db);
+    if (skippedShort > 0)
+      console.log(
+        `[scan] ignored ${skippedShort} file${skippedShort === 1 ? "" : "s"} shorter than ${MIN_DURATION_SECONDS}s (samples) in folder ${folder.id}`,
+      );
     const now = Math.floor(Date.now() / 1000);
     db.prepare(
       "UPDATE library_folders SET scan_status = ?, last_scanned = ? WHERE id = ?",
@@ -276,7 +315,7 @@ export async function scanLibraryFolder(
     );
     throw err;
   }
-  return { added, pruned };
+  return { added, pruned, skippedShort };
 }
 
 // Empty trash: remove media_items in this folder whose file no longer exists

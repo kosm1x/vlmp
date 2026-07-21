@@ -4,7 +4,13 @@
 import { describe, it, expect, beforeEach, afterEach } from "vitest";
 import Fastify, { type FastifyInstance } from "fastify";
 import Database from "better-sqlite3";
-import { mkdirSync, writeFileSync, rmSync, mkdtempSync } from "node:fs";
+import {
+  mkdirSync,
+  writeFileSync,
+  rmSync,
+  mkdtempSync,
+  chmodSync,
+} from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { initSchema } from "../src/db/schema.js";
@@ -411,6 +417,86 @@ describe("categories — scan, series detection, backfill", () => {
       hidMedia,
     );
   });
+
+  // Short-file (sample) filter — needs a probe that reports real durations,
+  // so a stub "ffprobe" answers by filename. POSIX-only like the other stubs.
+  describe.skipIf(process.platform === "win32")(
+    "short-file filter (samples)",
+    () => {
+      let stub: string;
+
+      beforeEach(() => {
+        stub = join(root, "fake-ffprobe.sh");
+        writeFileSync(
+          stub,
+          '#!/bin/sh\nfor last; do :; done\ncase "$last" in\n' +
+            "  *sample*) d=45 ;;\n" +
+            "  *broken*) d=0 ;;\n" +
+            "  *) d=3600 ;;\n" +
+            "esac\n" +
+            'printf \'{"format":{"duration":"%s"},"streams":[]}\' "$d"\n',
+        );
+        chmodSync(stub, 0o755);
+      });
+
+      const stubConfig = () => ({ ...scanConfig, ffprobePath: stub });
+
+      it("does not insert files shorter than 2 minutes", async () => {
+        writeFileSync(join(root, "movie-sample.mkv"), "x");
+        const result = await scanLibraryFolder(db, folder, stubConfig());
+        expect(result.skippedShort).toBe(1);
+        expect(
+          db
+            .prepare(
+              "SELECT 1 FROM media_items WHERE file_path LIKE '%sample%'",
+            )
+            .get(),
+        ).toBeUndefined();
+        // The real files were inserted with their probed duration.
+        expect(
+          db
+            .prepare(
+              "SELECT duration FROM media_items WHERE file_path LIKE '%Free Solo%'",
+            )
+            .get(),
+        ).toEqual({ duration: 3600 });
+      });
+
+      it("keeps files whose duration is unknown (0) — no evidence, no drop", async () => {
+        writeFileSync(join(root, "broken-container.mkv"), "x");
+        await scanLibraryFolder(db, folder, stubConfig());
+        expect(
+          db
+            .prepare(
+              "SELECT 1 FROM media_items WHERE file_path LIKE '%broken%'",
+            )
+            .get(),
+        ).toBeTruthy();
+      });
+
+      it("keeps files when the probe itself fails", async () => {
+        // scanConfig points ffprobe at /nonexistent — every probe throws.
+        await scanLibraryFolder(db, folder, scanConfig);
+        expect(db.prepare("SELECT COUNT(*) c FROM media_items").get()).toEqual({
+          c: 4,
+        });
+      });
+
+      it("rescan prunes short rows stored before the filter existed", async () => {
+        db.prepare(
+          "INSERT INTO media_items (library_folder_id, type, file_path, title, sort_title, duration) VALUES (?, 'movie', ?, 'Old Sample', 'old sample', 45)",
+        ).run(folder.id, join(root, "old-clip.mkv"));
+        writeFileSync(join(root, "old-clip.mkv"), "x");
+        const result = await scanLibraryFolder(db, folder, stubConfig());
+        expect(result.skippedShort).toBe(1);
+        expect(
+          db
+            .prepare("SELECT 1 FROM media_items WHERE title = 'Old Sample'")
+            .get(),
+        ).toBeUndefined();
+      });
+    },
+  );
 
   it("a series-kind custom category groups even bare numbered files", async () => {
     const r2 = mkdtempSync(join(tmpdir(), "vlmp-cats2-"));
