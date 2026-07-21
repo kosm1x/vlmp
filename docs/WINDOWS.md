@@ -8,8 +8,10 @@ this checklist passes on real hardware).
 ## Installer (recommended)
 
 Download `vlmp-setup-<version>-win-x64.exe` from
-<https://github.com/kosm1x/vlmp/releases> (v0.1.3 published 2026-07-20;
+<https://github.com/kosm1x/vlmp/releases> (v0.1.6 published 2026-07-21;
 SmartScreen warns on unsigned installers — "More info → Run anyway").
+Do not run v0.1.5 — its seek/quality-switch timestamps were broken
+(fixed in v0.1.6).
 v0.1.0 had a launcher ACL bug that left `jwt.secret` with an empty DACL on
 the second start (EPERM at boot) — upgrade, or repair in place with
 `icacls C:\ProgramData\vlmp\* /reset /t /c` from an elevated prompt.
@@ -125,8 +127,14 @@ prints either `[transcode] hardware encoder: h264_nvenc` or a warning that
 it fell back to software. A specific value (`nvenc`, `qsv`, `amf`) forces
 that probe only. Needs current GPU drivers; ffmpeg from winget
 (`Gyan.FFmpeg`) already includes all three encoders. With hardware enabled,
-a 4K-source transcode drops from ~40% CPU to single digits — the encode
-moves to the GPU's dedicated media block, not the 3D cores.
+a 4K-source transcode drops from ~40% CPU to ~15-20% (GPU encode; add GPU
+decode working and it reaches single digits).
+
+Hardware can't break playback: if a hardware transcode fails on a real
+file, the log shows `disabling hardware encoder ...`, VLMP falls back to
+software x264 for the rest of the run, and the interrupted stream restarts
+itself. If you see that line during normal use, report it — it means the
+GPU pipeline rejected that specific media.
 
 ## Metadata / posters (TMDb)
 
