@@ -430,7 +430,7 @@ describe("categories — scan, series detection, backfill", () => {
         writeFileSync(
           stub,
           '#!/bin/sh\nfor last; do :; done\ncase "$last" in\n' +
-            "  *sample*) d=45 ;;\n" +
+            "  *sample*|*song*) d=45 ;;\n" +
             "  *broken*) d=0 ;;\n" +
             "  *) d=3600 ;;\n" +
             "esac\n" +
@@ -482,6 +482,35 @@ describe("categories — scan, series detection, backfill", () => {
         });
       });
 
+      it("never filters audio — short tracks are normal music", async () => {
+        writeFileSync(join(root, "short-song.mp3"), "x");
+        const result = await scanLibraryFolder(db, folder, stubConfig());
+        expect(result.skippedShort).toBe(0);
+        expect(
+          db
+            .prepare(
+              "SELECT duration FROM media_items WHERE file_path LIKE '%short-song%'",
+            )
+            .get(),
+        ).toEqual({ duration: 45 });
+      });
+
+      it("floor 0 disables the filter entirely", async () => {
+        writeFileSync(join(root, "movie-sample.mkv"), "x");
+        const result = await scanLibraryFolder(db, folder, {
+          ...stubConfig(),
+          minDurationSeconds: 0,
+        });
+        expect(result.skippedShort).toBe(0);
+        expect(
+          db
+            .prepare(
+              "SELECT 1 FROM media_items WHERE file_path LIKE '%sample%'",
+            )
+            .get(),
+        ).toBeTruthy();
+      });
+
       it("rescan prunes short rows stored before the filter existed", async () => {
         db.prepare(
           "INSERT INTO media_items (library_folder_id, type, file_path, title, sort_title, duration) VALUES (?, 'movie', ?, 'Old Sample', 'old sample', 45)",
@@ -493,6 +522,55 @@ describe("categories — scan, series detection, backfill", () => {
           db
             .prepare("SELECT 1 FROM media_items WHERE title = 'Old Sample'")
             .get(),
+        ).toBeUndefined();
+      });
+
+      it("honors VLMP_EMPTY_TRASH_ON_SCAN=false for the backfill delete", async () => {
+        db.prepare(
+          "INSERT INTO media_items (library_folder_id, type, file_path, title, sort_title, duration) VALUES (?, 'movie', ?, 'Kept Sample', 'kept sample', 45)",
+        ).run(folder.id, join(root, "old-clip.mkv"));
+        writeFileSync(join(root, "old-clip.mkv"), "x");
+        const result = await scanLibraryFolder(db, folder, {
+          ...stubConfig(),
+          emptyTrashOnScan: false,
+        });
+        expect(result.skippedShort).toBe(0);
+        // Row survives (reclassify may re-title it; identity is the path).
+        expect(
+          db
+            .prepare("SELECT 1 FROM media_items WHERE file_path = ?")
+            .get(join(root, "old-clip.mkv")),
+        ).toBeTruthy();
+      });
+
+      it("backfill delete cascades episode links and sweeps the emptied show", async () => {
+        const epPath = join(root, "clip-show.mkv");
+        writeFileSync(epPath, "x");
+        const media = db
+          .prepare(
+            "INSERT INTO media_items (library_folder_id, type, file_path, title, sort_title, duration) VALUES (?, 'episode', ?, 'Clip', 'clip', 45) RETURNING id",
+          )
+          .get(folder.id, epPath) as { id: number };
+        db.prepare(
+          "INSERT INTO tv_shows (id, title, folder_path) VALUES (8, 'Clips Only', 'clips-only')",
+        ).run();
+        db.prepare(
+          "INSERT INTO seasons (id, show_id, season_number) VALUES (8, 8, 1)",
+        ).run();
+        db.prepare(
+          "INSERT INTO episodes (season_id, media_id, episode_number) VALUES (8, ?, 1)",
+        ).run(media.id);
+
+        await scanLibraryFolder(db, folder, stubConfig());
+
+        expect(
+          db.prepare("SELECT 1 FROM media_items WHERE id = ?").get(media.id),
+        ).toBeUndefined();
+        expect(
+          db.prepare("SELECT 1 FROM episodes WHERE media_id = ?").get(media.id),
+        ).toBeUndefined();
+        expect(
+          db.prepare("SELECT 1 FROM tv_shows WHERE id = 8").get(),
         ).toBeUndefined();
       });
     },

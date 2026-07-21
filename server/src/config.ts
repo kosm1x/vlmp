@@ -23,6 +23,7 @@ export interface Config {
   hwTranscode: string;
   emptyTrashOnScan: boolean;
   extractSubsOnScan: boolean;
+  minDurationSeconds: number;
   ffprobeTimeoutMs: number;
   backupDir: string;
   backupIntervalHours: number;
@@ -160,6 +161,19 @@ export function loadConfig(): Config {
       `Invalid VLMP_BACKUP_RETENTION: ${process.env.VLMP_BACKUP_RETENTION}. Must be >= 1.`,
     );
   }
+  // Sample-file floor: VIDEO files with a known duration under this are
+  // ignored by scans (release-folder sample clips). 0 disables the filter
+  // (e.g. libraries of legitimate short clips). Audio is never filtered —
+  // sub-2-minute tracks are normal.
+  const minDurationSeconds = parseInt(
+    process.env.VLMP_MIN_DURATION_SECONDS || "120",
+    10,
+  );
+  if (isNaN(minDurationSeconds) || minDurationSeconds < 0) {
+    throw new Error(
+      `Invalid VLMP_MIN_DURATION_SECONDS: ${process.env.VLMP_MIN_DURATION_SECONDS}. Must be >= 0 (0 disables).`,
+    );
+  }
   const tmdbApiKey = process.env.VLMP_TMDB_API_KEY || "";
   if (!tmdbApiKey) {
     console.warn(
@@ -195,6 +209,7 @@ export function loadConfig(): Config {
     // demand (routes/subtitles.ts); this exists for operators who prefer to
     // pre-warm subtitles overnight.
     extractSubsOnScan: process.env.VLMP_EXTRACT_SUBS_ON_SCAN === "true",
+    minDurationSeconds,
     ffprobeTimeoutMs: parseInt(
       process.env.VLMP_FFPROBE_TIMEOUT_MS || "30000",
       10,

@@ -6,7 +6,7 @@
 
 [![License](https://img.shields.io/badge/license-Apache--2.0-blue.svg)](LICENSE)
 ![Node](https://img.shields.io/badge/node-%3E%3D22-brightgreen.svg)
-![Tests](https://img.shields.io/badge/tests-342%20passing-brightgreen.svg)
+![Tests](https://img.shields.io/badge/tests-346%20passing-brightgreen.svg)
 
 </div>
 
@@ -40,7 +40,7 @@ If that scope fits how you actually watch, welcome.
 
 - **Adaptive bitrate streaming** — On-the-fly HLS transcoding via FFmpeg (1080p/720p/480p/360p)
 - **Direct play** — Zero-transcode for browser-compatible formats (H.264 MP4, WebM, etc.)
-- **Smart library scanning** — Recursive discovery with automatic classification (movies, TV, documentaries, education); sample/trailer clips shorter than 2 minutes are ignored
+- **Smart library scanning** — Recursive discovery with automatic classification (movies, TV, documentaries, education); sample/trailer video clips shorter than 2 minutes are ignored (`VLMP_MIN_DURATION_SECONDS`, 0 disables; audio is never filtered)
 - **Custom categories** — Create/delete your own nav categories (defaults deletable too); each is "single titles" or "series"
 - **Series everywhere** — Season/episode detection from filenames (`S01E01`, `1x01`) and `Season N`/`Series N`/`Temporada N` folders, in ANY category — a Docs library can mix single documentaries with doc series; episodes group into show pages with per-season episode lists
 - **OpenSubtitles integration** — Subtitle availability shown on every detail page; search and apply subtitles from opensubtitles.com in two clicks (free API key required)
@@ -113,7 +113,7 @@ All configuration is via environment variables. The important ones:
 | `VLMP_SERVER_NAME`           | `VLMP`                      | Display name in federation                            |
 | `VLMP_PUBLIC_URL`            | _(empty)_                   | Public URL for federation linking                     |
 
-The full list (transcode limits, free-disk floor, scheduled backups, x264 preset, empty-trash-on-scan) is documented in [`.env.example`](.env.example).
+The full list (transcode limits, free-disk floor, sample-duration floor, scheduled backups, x264 preset, empty-trash-on-scan) is documented in [`.env.example`](.env.example).
 
 ## Architecture
 

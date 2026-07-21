@@ -145,10 +145,24 @@ export function removeLibraryFolder(
 }
 
 // Sample/trailer filter: release folders ship 30-60s "sample" clips next to
-// the real file. Anything with a KNOWN duration under this floor is neither
-// inserted nor enriched; an unknown duration (probe failed, or container
-// reports 0) is NOT treated as short — never drop media on missing evidence.
-export const MIN_DURATION_SECONDS = 120;
+// the real file. A VIDEO file with a KNOWN duration under the configured
+// floor (config.minDurationSeconds, default 120, 0 = off) is neither
+// inserted nor enriched. Two hard rules: unknown duration (probe failed,
+// container reports 0) is NOT short — never drop media on missing evidence;
+// and audio is NEVER filtered — sub-2-minute tracks are normal music.
+function isShortSample(
+  isVideo: boolean,
+  duration: number | null | undefined,
+  config: Config,
+): boolean {
+  return (
+    config.minDurationSeconds > 0 &&
+    isVideo &&
+    duration != null &&
+    duration > 0 &&
+    duration < config.minDurationSeconds
+  );
+}
 
 export async function scanLibraryFolder(
   db: Database.Database,
@@ -191,11 +205,11 @@ export async function scanLibraryFolder(
       if (existing) {
         // Backfill: rows stored before the short-file filter existed get
         // pruned on rescan (FK cascades clean episodes/progress/playlists;
-        // orphaned shows are swept below).
+        // orphaned shows are swept below). Row deletion on scan is exactly
+        // what VLMP_EMPTY_TRASH_ON_SCAN opts out of — honor it here too.
         if (
-          existing.duration !== null &&
-          existing.duration > 0 &&
-          existing.duration < MIN_DURATION_SECONDS
+          config.emptyTrashOnScan &&
+          isShortSample(file.isVideo, existing.duration, config)
         ) {
           db.prepare("DELETE FROM media_items WHERE id = ?").run(existing.id);
           skippedShort++;
@@ -214,13 +228,9 @@ export async function scanLibraryFolder(
       } catch {
         /* skip */
       }
-      // Short file = sample/trailer: don't insert, don't TMDb-match, don't
-      // extract subtitles. Only a POSITIVE short duration counts as evidence.
-      if (
-        probe &&
-        probe.duration > 0 &&
-        probe.duration < MIN_DURATION_SECONDS
-      ) {
+      // Short video = sample/trailer: don't insert, don't TMDb-match, don't
+      // extract subtitles.
+      if (isShortSample(file.isVideo, probe?.duration, config)) {
         skippedShort++;
         continue;
       }
@@ -302,7 +312,7 @@ export async function scanLibraryFolder(
     sweepOrphanShows(db);
     if (skippedShort > 0)
       console.log(
-        `[scan] ignored ${skippedShort} file${skippedShort === 1 ? "" : "s"} shorter than ${MIN_DURATION_SECONDS}s (samples) in folder ${folder.id}`,
+        `[scan] ignored ${skippedShort} video${skippedShort === 1 ? "" : "s"} shorter than ${config.minDurationSeconds}s (samples) in folder ${folder.id}`,
       );
     const now = Math.floor(Date.now() / 1000);
     db.prepare(
