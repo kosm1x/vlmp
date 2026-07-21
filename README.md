@@ -6,7 +6,7 @@
 
 [![License](https://img.shields.io/badge/license-Apache--2.0-blue.svg)](LICENSE)
 ![Node](https://img.shields.io/badge/node-%3E%3D22-brightgreen.svg)
-![Tests](https://img.shields.io/badge/tests-288%20passing-brightgreen.svg)
+![Tests](https://img.shields.io/badge/tests-291%20passing-brightgreen.svg)
 
 </div>
 
