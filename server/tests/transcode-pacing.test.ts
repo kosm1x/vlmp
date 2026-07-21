@@ -24,7 +24,7 @@ import {
   type StreamSession,
 } from "../src/streaming/session.js";
 import { getAvailableProfiles } from "../src/streaming/adaptive.js";
-import { primeHwEncoder } from "../src/streaming/hw-encoders.js";
+import { primeHwEncoder, getHwEncoder } from "../src/streaming/hw-encoders.js";
 
 // Spawning this fails with ENOENT — the job dies almost immediately.
 const DEAD_FFMPEG = "/nonexistent/ffmpeg-for-args-test";
@@ -127,6 +127,26 @@ describe("startTranscode pacing args", () => {
     expect(args[i + 1]).toBe("expr:gte(t,n_forced*6)");
   });
 
+  it("re-bases positional runs onto the absolute timeline (-output_ts_offset)", () => {
+    // Without this, a seek/ABR restart emits 0-based PTS while the playlist
+    // maps the segment to n*6 — mixing runs stalls hls.js (field 2026-07-21).
+    const args = argsOf(
+      startTranscode("/in.mkv", "s9", profile, cfgDead, {
+        startTime: 600,
+        startNumber: 100,
+      }),
+    );
+    const i = args.indexOf("-output_ts_offset");
+    expect(args[i + 1]).toBe("600");
+    // Output option: must come after -i (it applies to the output file)
+    expect(i).toBeGreaterThan(args.indexOf("-i"));
+  });
+
+  it("omits -output_ts_offset for from-zero runs", () => {
+    const args = argsOf(startTranscode("/in.mkv", "s10", profile, cfgDead));
+    expect(args).not.toContain("-output_ts_offset");
+  });
+
   it("uses the probed hardware encoder with GPU decode, no x264 flags", () => {
     primeHwEncoder("h264_nvenc");
     const args = argsOf(startTranscode("/in.mkv", "s7", profile, cfgDead));
@@ -136,6 +156,8 @@ describe("startTranscode pacing args", () => {
     // -hwaccel is an input option — must precede -i
     expect(args.indexOf("-hwaccel")).toBeGreaterThan(-1);
     expect(args.indexOf("-hwaccel")).toBeLessThan(args.indexOf("-i"));
+    // forced keyframes must be real IDR on hw or segments aren't seekable
+    expect(args.indexOf("-forced-idr")).toBeGreaterThan(-1);
     // shared flags survive
     expect(args).toContain("-force_key_frames");
     expect(args).toContain("-readrate");
@@ -300,6 +322,29 @@ describe.skipIf(process.platform === "win32")("ensureSegmentReady", () => {
     const fresh = session.jobs.get("720p")!;
     expect(fresh).not.toBe(old);
     expect(fresh.startNumber).toBe(6);
+  });
+
+  it("disables hardware and self-heals to software after a dead hw job", async () => {
+    // The boot probe only tests a synthetic clip — real media can kill the
+    // GPU pipeline. A hw job that died nonzero must flip the whole process
+    // to software so the automatic restart stops retrying a broken pipeline.
+    primeHwEncoder("h264_nvenc");
+    const session = makeSession();
+    // First demand spawns an hw job with the dead binary: spawn error →
+    // exited, exitCode -1. The in-call rescue restart also dies.
+    await expect(
+      ensureSegmentReady(session, "720p", "segment_0000.ts", cfgDead, 400),
+    ).rejects.toThrow();
+    expect(session.jobs.get("720p")!.hwEncoder).toBe("h264_nvenc");
+    // The player's retry observes the dead hw job → hardware disabled,
+    // respawn is software.
+    await expect(
+      ensureSegmentReady(session, "720p", "segment_0000.ts", cfgDead, 400),
+    ).rejects.toThrow();
+    expect(getHwEncoder()).toBe(null);
+    const job = session.jobs.get("720p")!;
+    expect(job.hwEncoder).toBe(null);
+    expect(job.process.spawnargs).toContain("libx264");
   });
 
   it("does not thrash-restart a freshly restarted job", async () => {

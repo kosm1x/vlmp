@@ -14,6 +14,20 @@ const ENCODER_BY_MODE: Record<string, string> = {
   amf: "h264_amf",
   videotoolbox: "h264_videotoolbox",
 };
+
+// Per-encoder speed/quality knobs, used by BOTH the boot probe and real
+// transcodes — probing with the exact flags we ship means a wrong option
+// name fails the probe cleanly at boot instead of killing first playback.
+// forced-idr: -force_key_frames on hw encoders emits plain I-frames unless
+// told otherwise; segments led by a non-IDR frame aren't independently
+// decodable, so seeks glitch. NOTE: h264_amf has no such option in any
+// released ffmpeg (master-only as of 7.1) — do not add it (audit 2026-07-21).
+export const HW_ENCODER_TUNING: Record<string, string[]> = {
+  h264_nvenc: ["-preset", "p4", "-forced-idr", "1"],
+  h264_qsv: ["-preset", "veryfast", "-forced_idr", "1"],
+  h264_amf: ["-quality", "speed"],
+  h264_videotoolbox: [],
+};
 const AUTO_ORDER = ["nvenc", "qsv", "amf", "videotoolbox"];
 const PROBE_TIMEOUT_MS = 10_000;
 
@@ -39,6 +53,7 @@ function probeEncode(ffmpegPath: string, encoder: string): Promise<boolean> {
         "3",
         "-c:v",
         encoder,
+        ...HW_ENCODER_TUNING[encoder],
         "-f",
         "null",
         "-",
@@ -92,6 +107,18 @@ export async function initHwEncoder(config: Config): Promise<void> {
   console.warn(
     `[transcode] VLMP_HW_TRANSCODE=${config.hwTranscode} but no hardware encoder passed the probe — using software x264`,
   );
+}
+
+// The boot probe only proves the encoder works on a synthetic clip — real
+// media can still kill the GPU pipeline (unsupported decode, driver limits).
+// A hardware job that dies without finishing disables hardware for the rest
+// of the process: playback self-heals to software, never breaks.
+export function disableHwEncoder(reason: string): void {
+  if (!selectedEncoder) return;
+  console.warn(
+    `[transcode] disabling hardware encoder ${selectedEncoder} — ${reason}; using software x264 until restart`,
+  );
+  selectedEncoder = null;
 }
 
 /** Test hooks. */

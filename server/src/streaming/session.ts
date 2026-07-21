@@ -4,6 +4,7 @@ import { join } from "node:path";
 import { randomBytes } from "node:crypto";
 import type { Config } from "../config.js";
 import { maxSegmentIndex, type TranscodeProfile } from "./adaptive.js";
+import { disableHwEncoder } from "./hw-encoders.js";
 import {
   startTranscode,
   waitForSegment,
@@ -199,6 +200,21 @@ export async function ensureSegmentReady(
     job = startProfileTranscode(session, profileName, config, n) ?? undefined;
     if (!job) throw new Error("Profile not found");
   }
+  // A hardware job that died with a nonzero exit means the GPU pipeline
+  // fails on this real media (the boot probe only tests a synthetic clip).
+  // Disable hardware for the whole process — every restart below then
+  // respawns in software, so playback self-heals instead of retrying the
+  // same broken pipeline. (Reaped jobs exit via signal with a null code and
+  // clean EOF exits 0 — neither trips this.)
+  if (
+    job.hwEncoder &&
+    job.exited &&
+    job.exitCode !== null &&
+    job.exitCode !== 0
+  )
+    disableHwEncoder(
+      `job ${session.id}/${profileName} exited ${job.exitCode} on ${session.filePath}`,
+    );
   job.lastAccessed = Date.now();
   const segmentPath = join(job.outputDir, segmentName);
   if (existsSync(segmentPath)) return segmentPath;

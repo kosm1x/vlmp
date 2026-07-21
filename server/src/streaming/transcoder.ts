@@ -4,7 +4,7 @@ import { join } from "node:path";
 import type { Config } from "../config.js";
 import type { TranscodeProfile } from "./adaptive.js";
 import { getFfmpegCaps } from "./ffmpeg-caps.js";
-import { getHwEncoder } from "./hw-encoders.js";
+import { getHwEncoder, HW_ENCODER_TUNING } from "./hw-encoders.js";
 
 export const SEGMENT_SECONDS = 6;
 // 1.5x playback speed keeps the encoder comfortably ahead of the player
@@ -13,16 +13,6 @@ export const SEGMENT_SECONDS = 6;
 // unpaced so startup and near seeks stay instant.
 const READRATE = 1.5;
 const READRATE_BURST_SECONDS = 120;
-
-// Per-encoder speed/quality knobs. x264's -preset/-tune don't apply to
-// hardware encoders; each has its own vocabulary. Bitrate/profile/level/
-// keyframe flags are shared and stay outside this table.
-const HW_ENCODER_TUNING: Record<string, string[]> = {
-  h264_nvenc: ["-preset", "p4"],
-  h264_qsv: ["-preset", "veryfast"],
-  h264_amf: ["-quality", "speed"],
-  h264_videotoolbox: [],
-};
 
 export interface TranscodeJob {
   process: ChildProcess;
@@ -33,6 +23,8 @@ export interface TranscodeJob {
   startNumber: number;
   /** Last time a playlist/segment request touched this job — reaper input. */
   lastAccessed: number;
+  /** Hardware encoder this job was spawned with, null = software x264. */
+  hwEncoder: string | null;
   exited: boolean;
   exitCode: number | null;
 }
@@ -63,7 +55,9 @@ export function startTranscode(
   // ffmpeg silently falls back to software decoding if hwaccel init fails,
   // and decoded frames land in system memory so the scale/pad filter chain
   // is unchanged. This is where the 4K-source CPU cost goes away.
-  if (hw) args.push("-hwaccel", "auto");
+  // extra_hw_frames: NVDEC commonly fails 4K HEVC with "No decoder surfaces
+  // left" without a few spare surfaces; ignored by software decoders.
+  if (hw) args.push("-hwaccel", "auto", "-extra_hw_frames", "3");
   args.push("-i", inputPath);
   if (hw) {
     args.push("-c:v", hw, ...HW_ENCODER_TUNING[hw]);
@@ -109,6 +103,15 @@ export function startTranscode(
     args.push("-map", "0:v:0", "-map", `0:a:${options.audioTrack}`);
   else args.push("-map", "0:v:0", "-map", "0:a:0?");
   const startNumber = options?.startNumber ?? 0;
+  // An input seek resets output timestamps to zero, but the synthesized VOD
+  // playlist maps segment n to absolute time n*6 — and hls.js shares one
+  // timestamp anchor across quality levels, so fragments from differently-
+  // seeked runs (ABR switch, seek restart) would land in the wrong place and
+  // stall playback. Re-base every positional run onto the absolute timeline.
+  // (Verified: mpegts's constant ~1.4s base offset composes identically in
+  // every run, so cross-run alignment is exact.)
+  if (options?.startTime && options.startTime > 0)
+    args.push("-output_ts_offset", String(options.startTime));
   args.push(
     "-f",
     "hls",
@@ -140,6 +143,7 @@ export function startTranscode(
     startedAt: Date.now(),
     startNumber,
     lastAccessed: Date.now(),
+    hwEncoder: hw,
     exited: false,
     exitCode: null,
   };
