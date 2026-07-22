@@ -1,6 +1,6 @@
 {
   "name": "vlmp",
-  "version": "0.1.8",
+  "version": "0.1.9",
   "description": "Very Light Media Player — a featherweight, self-hosted media server with HLS streaming and a Netflix-like web client",
   "type": "module",
   "license": "Apache-2.0",
