@@ -73,6 +73,9 @@ CREATE TABLE IF NOT EXISTS episodes (
   season_id INTEGER NOT NULL REFERENCES seasons(id) ON DELETE CASCADE,
   media_id INTEGER UNIQUE NOT NULL REFERENCES media_items(id) ON DELETE CASCADE,
   episode_number INTEGER NOT NULL,
+  -- 1 when the number was assigned by us (the file had no parseable number) so
+  -- a real numbered episode can evict a synthetic squatter from its slot.
+  synthetic INTEGER NOT NULL DEFAULT 0,
   UNIQUE(season_id, episode_number)
 );
 CREATE TABLE IF NOT EXISTS guest_passes (
@@ -253,6 +256,8 @@ export function initSchema(db: Database.Database): void {
     "is_searchable",
     "INTEGER NOT NULL DEFAULT 1",
   );
+  // Existing episodes were all number-parsed by the old linker, so 0 is correct.
+  addColumnIfMissing(db, "episodes", "synthetic", "INTEGER NOT NULL DEFAULT 0");
   db.exec(INDEXES);
   db.exec(
     `CREATE TABLE IF NOT EXISTS schema_version (version INTEGER NOT NULL);`,

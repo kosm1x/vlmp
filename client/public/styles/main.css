@@ -1198,6 +1198,12 @@ body {
   align-items: baseline;
   gap: 0.75rem;
   margin-bottom: 1.25rem;
+  flex-wrap: wrap;
+}
+.category-heading {
+  display: flex;
+  align-items: baseline;
+  gap: 0.75rem;
 }
 .category-title {
   font-size: 1.5rem;
@@ -1206,6 +1212,42 @@ body {
 .category-count {
   color: #888;
   font-size: 0.9rem;
+}
+.category-sort {
+  margin-left: auto;
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+}
+.sort-label {
+  color: #888;
+  font-size: 0.85rem;
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+}
+.sort-select {
+  background: var(--surface, #1a1a1a);
+  color: inherit;
+  border: 1px solid var(--border, #333);
+  border-radius: 6px;
+  padding: 0.3rem 0.5rem;
+  font-size: 0.85rem;
+  cursor: pointer;
+}
+.sort-reshuffle {
+  background: var(--surface, #1a1a1a);
+  color: inherit;
+  border: 1px solid var(--border, #333);
+  border-radius: 6px;
+  width: 1.9rem;
+  height: 1.9rem;
+  font-size: 1rem;
+  line-height: 1;
+  cursor: pointer;
+}
+.sort-reshuffle:hover {
+  border-color: var(--accent, #4a9);
 }
 .category-grid {
   display: grid;

@@ -42,9 +42,10 @@ export function registerLibraryRoutes(
       offset?: string;
       search?: string;
       exclude_episodes?: string;
+      all?: string;
     };
   }>("/library/browse", { preHandler: auth }, async (request) => {
-    const { type, category, limit, offset, search, exclude_episodes } =
+    const { type, category, limit, offset, search, exclude_episodes, all } =
       request.query;
     return browseLibrary(db, {
       type,
@@ -54,6 +55,11 @@ export function registerLibraryRoutes(
       search,
       includeHidden: request.user!.role === "admin",
       excludeEpisodes: exclude_episodes === "1" || exclude_episodes === "true",
+      // "Load everything" is only for a scoped category view (how the client
+      // uses it); without a category it would dump the whole table, so keep
+      // the LIMIT in that case.
+      all: (all === "1" || all === "true") && !!category,
+      userId: parseInt(request.user!.sub, 10),
     });
   });
 
@@ -128,7 +134,13 @@ export function registerLibraryRoutes(
   // compatibility alias for pre-0.2 API consumers.
   const showsHandler = async (
     request: FastifyRequest<{ Querystring: { category?: string } }>,
-  ) => getTVShows(db, request.user!.role === "admin", request.query.category);
+  ) =>
+    getTVShows(
+      db,
+      request.user!.role === "admin",
+      request.query.category,
+      parseInt(request.user!.sub, 10),
+    );
   app.get<{ Querystring: { category?: string } }>(
     "/library/shows",
     { preHandler: auth },

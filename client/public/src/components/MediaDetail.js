@@ -5,6 +5,7 @@ import { get, post, del } from "../api.js";
 import { navigate } from "../router.js";
 import { ThumbImg } from "./ThumbImg.js";
 import { MediaRow } from "./MediaRow.js";
+import { invalidateLibraryCache } from "./Browse.js";
 const html = htm.bind(h);
 
 export function MediaDetail({ id, serverId }) {
@@ -92,6 +93,9 @@ export function MediaDetail({ id, serverId }) {
         await post(`/preferences/${id}`, { action });
         setPreference(action);
       }
+      // The cached category grids carry a per-item `liked` flag that "Liked
+      // first" sorts on — this like/unlike just made them stale.
+      invalidateLibraryCache();
     } catch (e) {
       alert(e.message);
     }

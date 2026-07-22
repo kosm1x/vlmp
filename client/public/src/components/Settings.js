@@ -3,6 +3,7 @@ import { useState, useEffect, useRef } from "preact/hooks";
 import htm from "htm";
 import { get, post, del, patch, getUserRole, getUserId } from "../api.js";
 import { fetchCategories, invalidateCategories } from "../categories.js";
+import { invalidateLibraryCache } from "./Browse.js";
 import { FolderPicker } from "./FolderPicker.js";
 const html = htm.bind(h);
 
@@ -234,7 +235,12 @@ export function Settings() {
   // While any folder is scanning, refresh until every scan settles.
   function pollWhileScanning(data) {
     if (!mountedRef.current) return;
-    if (!data || !data.some((f) => f.scan_status === "scanning")) return;
+    if (!data || !data.some((f) => f.scan_status === "scanning")) {
+      // Scans settled: the library changed, so the cached browse pages for
+      // every category are stale — drop them so the next visit refetches.
+      invalidateLibraryCache();
+      return;
+    }
     clearTimeout(pollTimer.current);
     pollTimer.current = setTimeout(async () => {
       pollWhileScanning(await load());

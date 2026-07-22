@@ -1,7 +1,7 @@
 import { h } from "preact";
-import { useState, useEffect, useRef } from "preact/hooks";
+import { useState, useEffect, useRef, useMemo } from "preact/hooks";
 import htm from "htm";
-import { get, getUserRole } from "../api.js";
+import { get, getUserRole, getUserId } from "../api.js";
 import { fetchCategories } from "../categories.js";
 import { MediaCard } from "./MediaCard.js";
 import { ShowCard } from "./ShowCard.js";
@@ -26,72 +26,177 @@ const FIXED_ROWS = [
     endpoint: "/library/recent?limit=20",
   },
 ];
-const PAGE_SIZE = 60;
+const SHELF_SIZE = 20;
 
-// A category's contents = its shows (episodes grouped as one card each) +
-// its loose items (browse with exclude_episodes so nothing appears twice).
-async function loadCategoryContent(slug, limit, offset) {
-  const [shows, items] = await Promise.all([
-    offset === 0 ? get(`/library/shows?category=${slug}`) : Promise.resolve([]),
-    get(
-      `/library/browse?category=${slug}&exclude_episodes=1&limit=${limit}&offset=${offset}`,
-    ),
-  ]);
-  return { shows: shows || [], items: items.items || [], total: items.total };
+// Sort modes for the full category grid. Applied client-side over the fully
+// loaded + cached card list, so switching is instant and never refetches.
+const SORT_MODES = [
+  { key: "title", label: "Title (A–Z)" },
+  { key: "recent", label: "Recently added" },
+  { key: "random", label: "Random" },
+  { key: "liked", label: "Liked first" },
+];
+const SORT_STORAGE_KEY = "vlmp:categorySort";
+function initialSort() {
+  try {
+    const s = localStorage.getItem(SORT_STORAGE_KEY);
+    if (s && SORT_MODES.some((m) => m.key === s)) return s;
+  } catch {
+    /* storage disabled (private mode) — fall through to the default */
+  }
+  return "title";
 }
 
-// Full-category view: shows first, then a wrapping grid of the ENTIRE
-// category with paging — the home page's horizontal rows are a shelf, not
-// the library.
+// One entry per (user, category slug): the ENTIRE category, loaded once and
+// kept for the session so later browsing is instant (no refetch, no paging).
+// Keyed by user so a session change on the same tab (401-expiry has no reload)
+// can never serve one user another's cards — an admin's includeHidden listing
+// or a per-user liked flag. Cleared wholesale on login/logout/scan-settle.
+const fullCache = new Map();
+const cacheKey = (slug) => `${getUserId()}:${slug}`;
+export function invalidateLibraryCache() {
+  fullCache.clear();
+}
+
+function showSortTitle(title) {
+  return (title || "").replace(/^(?:the|a|an)\s+/i, "").toLowerCase();
+}
+
+// Fold shows + loose items into one uniform card list the sorter can order
+// together — a series is a single card sitting wherever its title/date/like
+// places it, never split from its own episodes.
+function toCards(shows, items) {
+  return [
+    ...shows.map((s) => ({
+      key: "show-" + s.id,
+      kind: "show",
+      show: s,
+      sortTitle: showSortTitle(s.title),
+      addedAt: s.added_at || 0,
+      liked: s.liked ? 1 : 0,
+    })),
+    ...items.map((i) => ({
+      key: "item-" + i.id,
+      kind: "item",
+      item: i,
+      sortTitle: i.sort_title || showSortTitle(i.title),
+      addedAt: i.added_at || 0,
+      liked: i.liked ? 1 : 0,
+    })),
+  ];
+}
+
+// A category's contents = its shows (episodes grouped as one card each) + its
+// loose items (browse with exclude_episodes so nothing appears twice). `all=1`
+// pulls the whole category in one shot; the result is cached by slug.
+async function loadCategoryFull(slug) {
+  const key = cacheKey(slug);
+  if (fullCache.has(key)) return fullCache.get(key);
+  const enc = encodeURIComponent(slug);
+  const [shows, browse] = await Promise.all([
+    get(`/library/shows?category=${enc}`),
+    get(`/library/browse?category=${enc}&exclude_episodes=1&all=1`),
+  ]);
+  const data = {
+    shows: shows || [],
+    items: (browse && browse.items) || [],
+  };
+  data.cards = toCards(data.shows, data.items);
+  fullCache.set(key, data);
+  return data;
+}
+
+// Home shelves want only a handful per category — a light capped fetch, never
+// the whole library.
+async function loadCategoryShelf(slug, limit) {
+  const enc = encodeURIComponent(slug);
+  const [shows, browse] = await Promise.all([
+    get(`/library/shows?category=${enc}`),
+    get(
+      `/library/browse?category=${enc}&exclude_episodes=1&limit=${limit}&offset=0`,
+    ),
+  ]);
+  return { shows: shows || [], items: (browse && browse.items) || [] };
+}
+
+function sortCards(cards, mode) {
+  const out = cards.slice();
+  const byTitle = (a, b) => a.sortTitle.localeCompare(b.sortTitle);
+  if (mode === "recent") {
+    out.sort((a, b) => b.addedAt - a.addedAt || byTitle(a, b));
+  } else if (mode === "liked") {
+    out.sort((a, b) => b.liked - a.liked || byTitle(a, b));
+  } else if (mode === "random") {
+    for (let i = out.length - 1; i > 0; i--) {
+      const j = Math.floor(Math.random() * (i + 1));
+      [out[i], out[j]] = [out[j], out[i]];
+    }
+  } else {
+    out.sort(byTitle);
+  }
+  return out;
+}
+
+// Full-category view: the whole category loaded once, cached, and sorted
+// client-side. The home page's horizontal rows are a shelf, not the library.
 function CategoryGrid({ category }) {
   const [cat, setCat] = useState(undefined); // undefined=loading, null=unknown
-  const [shows, setShows] = useState([]);
-  const [items, setItems] = useState([]);
-  const [total, setTotal] = useState(null);
+  const [data, setData] = useState(null); // { shows, items, cards }
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
+  const [sortMode, setSortMode] = useState(initialSort);
+  const [shuffleSeed, setShuffleSeed] = useState(0);
   // Category switches reconcile the SAME component instance — a slow response
   // for the old category must not land in the new one's grid.
   const genRef = useRef(0);
 
-  async function loadPage(offset, gen = genRef.current) {
-    setLoading(true);
-    setError("");
-    try {
-      const d = await loadCategoryContent(category, PAGE_SIZE, offset);
-      if (gen !== genRef.current) return; // stale category response
-      if (offset === 0) setShows(d.shows);
-      setItems((prev) => (offset === 0 ? d.items : prev.concat(d.items)));
-      setTotal(d.total ?? d.items.length);
-    } catch (err) {
-      if (gen === genRef.current)
-        setError(err.message || "Failed to load library");
-    } finally {
-      if (gen === genRef.current) setLoading(false);
-    }
-  }
-
   useEffect(() => {
     const gen = ++genRef.current;
     setCat(undefined);
-    setShows([]);
-    setItems([]);
-    setTotal(null);
+    setData(null);
+    setError("");
+    setLoading(true);
     fetchCategories()
-      .then((cats) => {
+      .then((cats) => cats.find((c) => c.slug === category) || null)
+      // Category list unavailable — try the browse anyway with the slug as its
+      // own label rather than dead-ending the page.
+      .catch(() => ({ slug: category, label: category }))
+      .then((found) => {
         if (gen !== genRef.current) return;
-        const found = cats.find((c) => c.slug === category) || null;
         setCat(found);
-        if (found) loadPage(0, gen);
-      })
-      .catch(() => {
-        if (gen !== genRef.current) return;
-        // Category list unavailable — try the browse anyway with the slug as
-        // its own label rather than dead-ending the page.
-        setCat({ slug: category, label: category });
-        loadPage(0, gen);
+        if (found === null) {
+          setLoading(false);
+          return;
+        }
+        return loadCategoryFull(category)
+          .then((d) => {
+            if (gen === genRef.current) setData(d);
+          })
+          .catch((err) => {
+            if (gen === genRef.current)
+              setError(err.message || "Failed to load library");
+          })
+          .finally(() => {
+            if (gen === genRef.current) setLoading(false);
+          });
       });
   }, [category]);
+
+  const cards = useMemo(
+    () => (data ? sortCards(data.cards, sortMode) : []),
+    // shuffleSeed forces a fresh shuffle when Random is (re)selected.
+    [data, sortMode, shuffleSeed],
+  );
+
+  function changeSort(mode) {
+    setSortMode(mode);
+    try {
+      localStorage.setItem(SORT_STORAGE_KEY, mode);
+    } catch {
+      /* storage disabled — the choice just won't persist */
+    }
+    if (mode === "random") setShuffleSeed((s) => s + 1);
+  }
 
   if (cat === undefined)
     return html`<div class="browse">
@@ -107,35 +212,67 @@ function CategoryGrid({ category }) {
     </div>`;
 
   const label = cat.label || category;
-  const empty = !loading && shows.length === 0 && items.length === 0;
+  const showCount = data ? data.shows.length : 0;
+  const total = data ? data.cards.length : 0;
+  const empty = !loading && data && total === 0;
   return html`<div class="browse">
     <div class="category-header">
-      <h1 class="category-title">${label}</h1>
+      <div class="category-heading">
+        <h1 class="category-title">${label}</h1>
+        ${
+          data &&
+          html`<span class="category-count"
+            >${showCount > 0 ? `${showCount} series · ` : ""}${total}
+            ${total === 1 ? "title" : "titles"}</span
+          >`
+        }
+      </div>
       ${
-        total !== null &&
-        html`<span class="category-count"
-          >${shows.length > 0 ? `${shows.length} series · ` : ""}${total}
-          ${total === 1 ? "title" : "titles"}</span
-        >`
+        data &&
+        total > 1 &&
+        html`<div class="category-sort">
+          <label class="sort-label"
+            >Sort
+            <select
+              class="sort-select"
+              value=${sortMode}
+              onChange=${(e) => changeSort(e.target.value)}
+            >
+              ${SORT_MODES.map(
+                (m) =>
+                  html`<option value=${m.key} selected=${m.key === sortMode}>
+                    ${m.label}
+                  </option>`,
+              )}
+            </select>
+          </label>
+          ${
+            sortMode === "random" &&
+            html`<button
+              class="sort-reshuffle"
+              title="Shuffle again"
+              onClick=${() => setShuffleSeed((s) => s + 1)}
+            >
+              ⟳
+            </button>`
+          }
+        </div>`
       }
     </div>
     ${error && html`<div class="empty"><h2>${error}</h2></div>`}
-    ${!error && empty && html`<div class="empty"><h2>Nothing in ${label} yet</h2></div>`}
-    <div class="category-grid">
-      ${shows.map((s) => html`<${ShowCard} key=${"show-" + s.id} show=${s} />`)}
-      ${items.map((item) => html`<${MediaCard} key=${item.id} item=${item} />`)}
-    </div>
-    ${loading && html`<div class="loading">Loading...</div>`}
     ${
-      !loading &&
-      total !== null &&
-      items.length < total &&
-      html`<div class="category-more">
-        <button class="lum-btn" onClick=${() => loadPage(items.length)}>
-          Load more (${items.length} of ${total})
-        </button>
-      </div>`
+      !error &&
+      empty &&
+      html`<div class="empty"><h2>Nothing in ${label} yet</h2></div>`
     }
+    ${loading && !data && html`<div class="loading">Loading...</div>`}
+    <div class="category-grid">
+      ${cards.map((c) =>
+        c.kind === "show"
+          ? html`<${ShowCard} key=${c.key} show=${c.show} />`
+          : html`<${MediaCard} key=${c.key} item=${c.item} />`,
+      )}
+    </div>
   </div>`;
 }
 
@@ -169,7 +306,7 @@ function HomeRows() {
         ...cats.map((c) => ({
           key: c.slug,
           label: c.label,
-          load: () => loadCategoryContent(c.slug, 20, 0),
+          load: () => loadCategoryShelf(c.slug, SHELF_SIZE),
         })),
       ];
       const results = await Promise.all(
@@ -179,7 +316,7 @@ function HomeRows() {
             const cards = [
               ...(d.shows || []).map((s) => ({ show: s })),
               ...(d.items || []).map((i) => ({ item: i })),
-            ].slice(0, 20);
+            ].slice(0, SHELF_SIZE);
             return { key: def.key, label: def.label, cards };
           } catch {
             return { key: def.key, label: def.label, cards: [] };

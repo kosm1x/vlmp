@@ -5,7 +5,8 @@ import { isLoggedIn } from "./api.js";
 import { getRoute, onRouteChange } from "./router.js";
 import { Login } from "./components/Login.js";
 import { Shell } from "./components/Shell.js";
-import { Browse } from "./components/Browse.js";
+import { Browse, invalidateLibraryCache } from "./components/Browse.js";
+import { invalidateCategories } from "./categories.js";
 import { Player } from "./components/Player.js";
 import { Search } from "./components/Search.js";
 import { MediaDetail } from "./components/MediaDetail.js";
@@ -32,6 +33,12 @@ function App() {
   if (!loggedIn)
     return html`<${Login}
       onLogin=${() => {
+        // A new session may be a different user than the one whose data is
+        // still cached in memory (session-expiry doesn't reload the page).
+        // Drop both caches so a non-admin never inherits an admin's
+        // hidden-folder listing, another user's liked flags, or a stale nav.
+        invalidateLibraryCache();
+        invalidateCategories();
         setLoggedIn(true);
         setRoute({ path: "/", params: {} });
       }}

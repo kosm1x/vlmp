@@ -48,6 +48,10 @@ export interface MediaItem {
   resolution_height: number | null;
   genres: string | null;
   rating: number | null;
+  added_at?: number;
+  // 1 when the requesting user has liked this item (only populated when
+  // browseLibrary is called with a userId — the client's "liked first" sort).
+  liked?: number;
 }
 
 export function addLibraryFolder(
@@ -389,7 +393,7 @@ function linkEpisodeToShow(
   folder: LibraryFolder,
   classified: ClassifiedMedia,
 ): number | null {
-  if (!classified.showTitle || classified.episodeNumber == null) return null;
+  if (!classified.showTitle) return null;
   const show = db
     .prepare(
       "INSERT INTO tv_shows (title, year, folder_path) VALUES (?, ?, ?) ON CONFLICT(folder_path) DO UPDATE SET title = excluded.title, year = COALESCE(excluded.year, tv_shows.year) RETURNING id",
@@ -412,12 +416,51 @@ function linkEpisodeToShow(
     .prepare("SELECT id FROM media_items WHERE file_path = ?")
     .get(filePath) as { id: number } | undefined;
   if (!media) return show.id;
+  const nextSlot = () =>
+    ((
+      db
+        .prepare(
+          "SELECT MAX(episode_number) AS m FROM episodes WHERE season_id = ?",
+        )
+        .get(season.id) as { m: number | null }
+    ).m ?? 0) + 1;
+  // A series file must bundle under its show even when the filename carries no
+  // episode number (bare "1.mkv", "E01.mkv", a descriptive title, or a number
+  // that lives only in the "Season N" folder). Left unlinked, such a row stays
+  // type='episode' yet absent from the episodes table — and the flat grid,
+  // which hides LINKED episodes rather than the 'episode' type, would surface
+  // it loose below the bundled show card ("unbundled on scroll"). Give it a
+  // stable in-season slot instead: reuse the number already stored so rescans
+  // never renumber, else take the next free slot after any real episodes.
+  const synthetic = classified.episodeNumber == null;
+  let episodeNumber: number;
+  if (synthetic) {
+    const prior = db
+      .prepare("SELECT episode_number FROM episodes WHERE media_id = ?")
+      .get(media.id) as { episode_number: number } | undefined;
+    episodeNumber = prior ? prior.episode_number : nextSlot();
+  } else {
+    episodeNumber = classified.episodeNumber!;
+    // A synthetic episode may have already claimed this real number (an
+    // unnumbered sibling scanned first). Move the squatter to a fresh slot so
+    // the real episode keeps its rightful number instead of failing to link.
+    const squatter = db
+      .prepare(
+        "SELECT id FROM episodes WHERE season_id = ? AND episode_number = ? AND synthetic = 1 AND media_id != ?",
+      )
+      .get(season.id, episodeNumber, media.id) as { id: number } | undefined;
+    if (squatter)
+      db.prepare("UPDATE episodes SET episode_number = ? WHERE id = ?").run(
+        nextSlot(),
+        squatter.id,
+      );
+  }
   try {
     // Upsert on media_id so reclassification MOVES an episode to its new
     // show/season instead of leaving it stuck on the legacy link.
     db.prepare(
-      "INSERT INTO episodes (season_id, media_id, episode_number) VALUES (?, ?, ?) ON CONFLICT(media_id) DO UPDATE SET season_id = excluded.season_id, episode_number = excluded.episode_number",
-    ).run(season.id, media.id, classified.episodeNumber);
+      "INSERT INTO episodes (season_id, media_id, episode_number, synthetic) VALUES (?, ?, ?, ?) ON CONFLICT(media_id) DO UPDATE SET season_id = excluded.season_id, episode_number = excluded.episode_number, synthetic = excluded.synthetic",
+    ).run(season.id, media.id, episodeNumber, synthetic ? 1 : 0);
   } catch (err) {
     // UNIQUE(season_id, episode_number): a second copy of the same episode
     // (different quality/container) — keep the first one linked. Anything
@@ -491,6 +534,11 @@ export function browseLibrary(
     search?: string;
     includeHidden?: boolean;
     excludeEpisodes?: boolean;
+    // Return the whole matching set in one shot (LIMIT/OFFSET skipped). The
+    // client caches and sorts a full category locally, so it loads it once.
+    all?: boolean;
+    // When set, each row carries a `liked` 0/1 for this user (client sort).
+    userId?: number;
   },
 ): { items: MediaItem[]; total: number } {
   const conditions: string[] = [];
@@ -524,18 +572,29 @@ export function browseLibrary(
     );
   const where =
     conditions.length > 0 ? `WHERE ${conditions.join(" AND ")}` : "";
-  const limit = options.limit || 50;
-  const offset = options.offset || 0;
+  // The liked flag lives in the SELECT list, so its param precedes the WHERE
+  // params in bind order.
+  const selectParams: unknown[] = [];
+  let likedCol = "0 AS liked";
+  if (options.userId != null) {
+    likedCol =
+      "CASE WHEN EXISTS (SELECT 1 FROM user_preferences up WHERE up.media_id = mi.id AND up.user_id = ? AND up.action = 'like') THEN 1 ELSE 0 END AS liked";
+    selectParams.push(options.userId);
+  }
   const total = db
     .prepare(
       `SELECT COUNT(*) as count FROM media_items mi LEFT JOIN library_folders lf ON mi.library_folder_id = lf.id ${where}`,
     )
     .get(...params) as { count: number };
+  const limitClause = options.all ? "" : "LIMIT ? OFFSET ?";
+  const limitParams = options.all
+    ? []
+    : [options.limit || 50, options.offset || 0];
   const items = db
     .prepare(
-      `SELECT mi.* FROM media_items mi LEFT JOIN library_folders lf ON mi.library_folder_id = lf.id ${where} ORDER BY mi.sort_title ASC LIMIT ? OFFSET ?`,
+      `SELECT mi.*, ${likedCol} FROM media_items mi LEFT JOIN library_folders lf ON mi.library_folder_id = lf.id ${where} ORDER BY mi.sort_title ASC ${limitClause}`,
     )
-    .all(...params, limit, offset) as MediaItem[];
+    .all(...selectParams, ...params, ...limitParams) as MediaItem[];
   return { items, total: total.count };
 }
 
@@ -566,6 +625,7 @@ export function getTVShows(
   db: Database.Database,
   includeHidden: boolean = false,
   category?: string,
+  userId?: number,
 ) {
   // A show is visible when at least one of its episodes' media is in a visible
   // folder; hidden-only shows drop out via HAVING episode_count > 0.
@@ -575,23 +635,31 @@ export function getTVShows(
         "view",
       )}))`;
   const having = includeHidden ? "" : "HAVING episode_count > 0";
+  // Same visibility gate reused by the correlated subqueries below so a show
+  // spanning a visible + hidden folder never borrows a hidden episode's id,
+  // date, or like (read_gate_every_surface).
+  const mediaGate = includeHidden
+    ? ""
+    : `AND {alias}.media_id IN (SELECT id FROM media_items WHERE library_folder_id IN (${visibleFolderSubquery("view")}))`;
+  // The liked flag's param sits in the SELECT list, so it precedes the
+  // category param (WHERE) in bind order.
   const params: unknown[] = [];
+  let likedCol = "0 AS liked";
+  if (userId != null) {
+    likedCol = `CASE WHEN EXISTS (SELECT 1 FROM episodes le JOIN seasons ls ON le.season_id = ls.id JOIN user_preferences up ON up.media_id = le.media_id WHERE ls.show_id = ts.id AND up.user_id = ? AND up.action = 'like' ${mediaGate.replace("{alias}", "le")}) THEN 1 ELSE 0 END AS liked`;
+    params.push(userId);
+  }
   let categoryFilter = "";
   if (category) {
     categoryFilter = `WHERE EXISTS (SELECT 1 FROM episodes e2 JOIN seasons s2 ON e2.season_id = s2.id JOIN media_items m2 ON m2.id = e2.media_id JOIN library_folders lf2 ON lf2.id = m2.library_folder_id WHERE s2.show_id = ts.id AND lf2.category = ?)`;
     params.push(category);
   }
-  // first_media_id: a stable episode to borrow a frame-grab thumb from when
-  // the show has no TMDb poster. Same visibility gate as epJoin — a show
-  // spanning a visible and a hidden folder must not hand a non-admin a
-  // hidden episode's id (read_gate_every_surface).
-  const firstMediaGate = includeHidden
-    ? ""
-    : `AND e3.media_id IN (SELECT id FROM media_items WHERE library_folder_id IN (${visibleFolderSubquery("view")}))`;
   return db
     .prepare(
       `SELECT ts.*, COUNT(DISTINCT s.id) as season_count, COUNT(e.id) as episode_count,
-        (SELECT e3.media_id FROM episodes e3 JOIN seasons s3 ON e3.season_id = s3.id WHERE s3.show_id = ts.id ${firstMediaGate} ORDER BY s3.season_number, e3.episode_number LIMIT 1) as first_media_id
+        (SELECT e3.media_id FROM episodes e3 JOIN seasons s3 ON e3.season_id = s3.id WHERE s3.show_id = ts.id ${mediaGate.replace("{alias}", "e3")} ORDER BY s3.season_number, e3.episode_number LIMIT 1) as first_media_id,
+        (SELECT MAX(m4.added_at) FROM episodes e4 JOIN seasons s4 ON e4.season_id = s4.id JOIN media_items m4 ON m4.id = e4.media_id WHERE s4.show_id = ts.id ${mediaGate.replace("{alias}", "e4")}) as added_at,
+        ${likedCol}
        FROM tv_shows ts LEFT JOIN seasons s ON s.show_id = ts.id ${epJoin} ${categoryFilter} GROUP BY ts.id ${having} ORDER BY ts.title`,
     )
     .all(...params);
