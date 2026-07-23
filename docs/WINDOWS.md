@@ -26,6 +26,32 @@ What the installed app does differently from a manual setup:
 
 The manual path below is for running from source.
 
+## Troubleshooting: videos won't play / "needs transcoding" even though FFmpeg is installed
+
+The installed app runs as a **Windows service under the LocalSystem account**,
+which has its **own PATH** — separate from your interactive login. `winget
+install Gyan.FFmpeg` adds FFmpeg to **your user PATH**, so `ffmpeg -version`
+works in your prompt while the _service_ still can't find it. Symptoms: a folder
+scans with no codec info, videos show "This video's format can't be played…",
+and the server log prints
+`[preflight] ffprobe not found at "ffprobe" …` at startup.
+
+Fix — point VLMP straight at the binaries so PATH is irrelevant. Run `where
+ffmpeg` / `where ffprobe`, then add to `%ProgramData%\vlmp\vlmp.env`
+(edit as Administrator):
+
+```
+VLMP_FFMPEG_PATH=C:\Users\<you>\AppData\Local\Microsoft\WinGet\Links\ffmpeg.exe
+VLMP_FFPROBE_PATH=C:\Users\<you>\AppData\Local\Microsoft\WinGet\Links\ffprobe.exe
+```
+
+Restart the VLMP service. Two log lines confirm the service can now run FFmpeg:
+the `[preflight] … not found` warning is **gone**, and (with
+`VLMP_HW_TRANSCODE=auto`) `[transcode] hardware encoder: h264_nvenc` appears —
+that line can only print by successfully executing FFmpeg. Keep the `*_PATH`
+lines; the `WinGet\Links\` path is stable across FFmpeg updates. Then just play
+the video — it's re-checked on first play and transcoded as needed.
+
 ## Prerequisites (manual setup)
 
 ```powershell
