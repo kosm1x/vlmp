@@ -179,6 +179,47 @@ describe("POST /admin/metadata/scan", () => {
     await waitForIdle();
   });
 
+  it("incremental scan skips already-matched items", async () => {
+    // One matched (has poster) + one new (no poster).
+    seedMovie("Matched", "/m/matched.mkv", "https://img/existing.jpg");
+    const fresh = seedMovie("New Item", "/m/new.mkv", null);
+    vi.mocked(searchMovie).mockResolvedValue([]);
+    const res = await app.inject({
+      method: "POST",
+      url: "/admin/metadata/scan",
+      headers: hdr(),
+      payload: {},
+    });
+    // Only the unmatched item is enqueued — the matched one isn't re-walked.
+    expect(res.json().total).toBe(1);
+    await waitForIdle();
+    // The new item now carries a remembered no-match, so a second incremental
+    // run enqueues nothing at all.
+    const again = await app.inject({
+      method: "POST",
+      url: "/admin/metadata/scan",
+      headers: hdr(),
+      payload: {},
+    });
+    expect(again.json().total).toBe(0);
+    await waitForIdle();
+    void fresh;
+  });
+
+  it("full=true re-scans every item regardless of match state", async () => {
+    seedMovie("Matched", "/m/matched.mkv", "https://img/existing.jpg");
+    seedMovie("New Item", "/m/new.mkv", null);
+    vi.mocked(searchMovie).mockResolvedValue([]);
+    const res = await app.inject({
+      method: "POST",
+      url: "/admin/metadata/scan",
+      headers: hdr(),
+      payload: { full: true },
+    });
+    expect(res.json().total).toBe(2);
+    await waitForIdle();
+  });
+
   it("503s without a TMDb key and requires admin", async () => {
     const keyless = Fastify();
     const kdb = new Database(":memory:");

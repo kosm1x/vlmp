@@ -2,6 +2,7 @@ import { h } from "preact";
 import { useState, useEffect, useRef } from "preact/hooks";
 import htm from "htm";
 import { post, put, get, del } from "../api.js";
+import { navigate } from "../router.js";
 const html = htm.bind(h);
 
 function fmt(s) {
@@ -14,12 +15,31 @@ function fmt(s) {
     : `${m}:${String(sec).padStart(2, "0")}`;
 }
 
-export function Player({ mediaId, onClose, serverId, federated }) {
+export function Player({
+  mediaId,
+  onClose,
+  serverId,
+  federated,
+  show,
+  playlist,
+  index,
+}) {
   const videoRef = useRef(null);
   const hlsRef = useRef(null);
   const progressTimer = useRef(null);
   const keepaliveTimer = useRef(null);
   const lastUiUpdate = useRef(0);
+  // The full "/play/..." href of the next item in the series/playlist this
+  // player was opened from (null at the end), so a finished item auto-advances
+  // and playback continues until the queue runs out or the user leaves. It is a
+  // ready-made href (not just an id) so the queue context — and, for playlists,
+  // the exact position — survive the navigation.
+  const [nextHref, setNextHref] = useState(null);
+  function goNext() {
+    // replace: the player stays a single history entry, so Back exits instead
+    // of stepping back through every auto-advanced item.
+    if (nextHref) navigate(nextHref, true);
+  }
   // The stream timeline is absolute media time for BOTH direct play and HLS:
   // the server synthesizes a full VOD playlist from the real duration, so
   // resume is a plain seek and the bar needs no offset arithmetic.
@@ -39,6 +59,18 @@ export function Player({ mediaId, onClose, serverId, federated }) {
 
   useEffect(() => {
     let cancelled = false;
+    // Auto-advance UPDATES this player in place (mediaId prop changes), so clear
+    // every per-item field first — otherwise the previous episode's title, seek
+    // bar, and subtitle list flash until the new data lands.
+    setMedia(null);
+    setSubtitles([]);
+    setActiveSubtitle(null);
+    setAudioTracks([]);
+    setCurrentTime(0);
+    setDuration(0);
+    setPlaying(false);
+    setError("");
+    setLoading(true);
     async function init() {
       try {
         let mediaData, progress;
@@ -59,7 +91,16 @@ export function Player({ mediaId, onClose, serverId, federated }) {
           ? `/federation/servers/${serverId}/stream/${mediaId}/start`
           : `/stream/${mediaId}/start`;
         const sd = await post(streamUrl, {});
-        if (cancelled) return;
+        if (cancelled) {
+          // Navigated away while the session was starting: the effect cleanup
+          // already ran (sessionRef was still null), so tear down the session
+          // we just created rather than leaving it for the idle reaper.
+          const stopUrl = federated
+            ? `/federation/servers/${serverId}/stream/${sd.session_id}`
+            : `/stream/${sd.session_id}`;
+          del(stopUrl).catch(() => {});
+          return;
+        }
         sessionRef.current = sd;
         setAudioTracks(sd.audio_tracks || []);
         // Fetch subtitles with HMAC tokens (local only)
@@ -96,6 +137,13 @@ export function Player({ mediaId, onClose, serverId, federated }) {
           const hls = new Hls({
             maxBufferLength: 30,
             maxMaxBufferLength: 60,
+            // Segments are transcoded on demand, so a freshly-sought fragment
+            // can 404 for a few seconds while ffmpeg catches up. Give it a
+            // generous retry budget so a transient not-ready never becomes a
+            // fatal error.
+            fragLoadingMaxRetry: 8,
+            fragLoadingRetryDelay: 1000,
+            fragLoadingMaxRetryTimeout: 30000,
           });
           hls.loadSource(sd.url);
           hls.attachMedia(video);
@@ -106,8 +154,25 @@ export function Player({ mediaId, onClose, serverId, federated }) {
             if (resumeAt > 0) video.currentTime = resumeAt;
             video.play().catch(() => {});
           });
+          // Only give up after recovery fails: once hls.js exhausts its own
+          // fragment retries it fires a FATAL error, but for on-demand
+          // transcoding that usually just means "encoder still catching up".
+          // Resume loading (network) or rebuild the buffer (media) a few times
+          // before surfacing a permanent error; a clean fragment resets the
+          // budget so only a sustained failure stops playback.
+          let recoveries = 0;
+          hls.on(Hls.Events.FRAG_BUFFERED, () => {
+            recoveries = 0;
+          });
           hls.on(Hls.Events.ERROR, (_, d) => {
-            if (d.fatal) setError("Playback error");
+            if (!d.fatal) return;
+            if (recoveries >= 4) {
+              setError("Playback error");
+              return;
+            }
+            recoveries++;
+            if (d.type === Hls.ErrorTypes.MEDIA_ERROR) hls.recoverMediaError();
+            else hls.startLoad();
           });
           hlsRef.current = hls;
         } else if (video.canPlayType("application/vnd.apple.mpegurl")) {
@@ -135,6 +200,48 @@ export function Player({ mediaId, onClose, serverId, federated }) {
       endSession();
     };
   }, [mediaId]);
+
+  // Resolve the next item's href in the show/playlist this player was opened
+  // from. Playlists carry the current position (`index`) so a title that
+  // appears twice advances from the copy you actually played, not the first.
+  useEffect(() => {
+    let cancelled = false;
+    setNextHref(null);
+    if (federated || (!show && !playlist)) return;
+    (async () => {
+      try {
+        if (playlist) {
+          const pl = await get(`/playlists/${playlist}`);
+          const items = pl.items || [];
+          const cur =
+            index != null && index !== ""
+              ? Number(index)
+              : items.findIndex((it) => it.media_id === Number(mediaId));
+          const nxt = cur >= 0 ? items[cur + 1] : undefined;
+          if (!cancelled)
+            setNextHref(
+              nxt
+                ? `/play/${nxt.media_id}?playlist=${playlist}&i=${cur + 1}`
+                : null,
+            );
+        } else {
+          const d = await get(`/library/shows/${show}`);
+          const ids = (d.seasons || []).flatMap((s) =>
+            (s.episodes || []).map((e) => e.media_id),
+          );
+          const idx = ids.indexOf(Number(mediaId));
+          const nxt = idx >= 0 && idx + 1 < ids.length ? ids[idx + 1] : null;
+          if (!cancelled)
+            setNextHref(nxt != null ? `/play/${nxt}?show=${show}` : null);
+        }
+      } catch {
+        /* no queue context reachable — stay single-play */
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [mediaId, show, playlist, index, federated]);
 
   function saveProgress(fetchOptions) {
     if (federated) return;
@@ -275,11 +382,14 @@ export function Player({ mediaId, onClose, serverId, federated }) {
       onPause=${() => setPlaying(false)}
       onEnded=${() => {
         setPlaying(false);
-        if (federated) return;
-        put("/progress/" + mediaId, {
-          position_seconds: duration,
-          duration_seconds: duration,
-        }).catch(() => {});
+        if (!federated)
+          put("/progress/" + mediaId, {
+            position_seconds: duration,
+            duration_seconds: duration,
+          }).catch(() => {});
+        // Continuous playback: roll on to the next episode / playlist item
+        // until the queue is empty or the user leaves.
+        goNext();
       }}
       onClick=${togglePlay}
       autoplay
@@ -329,6 +439,17 @@ export function Player({ mediaId, onClose, serverId, federated }) {
         >
           ⏮
         </button>
+        ${
+          nextHref &&
+          html`<button
+            class="player-btn"
+            onClick=${goNext}
+            title="Next"
+            aria-label="Play next"
+          >
+            ⏭
+          </button>`
+        }
         <button
           class="player-btn"
           onClick=${toggleMute}

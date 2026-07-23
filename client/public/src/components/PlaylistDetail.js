@@ -1,8 +1,5 @@
 import { h } from "preact";
-import {
-  useState,
-  useEffect,
-} from "preact/hooks";
+import { useState, useEffect } from "preact/hooks";
 import htm from "htm";
 import { get, put, del } from "../api.js";
 import { navigate } from "../router.js";
@@ -48,69 +45,88 @@ export function PlaylistDetail({ id }) {
 
   return html`<div class="playlist-detail-page">
     <div class="playlist-header">
-      ${editing
-        ? html`<form
-            onSubmit=${rename}
-            style=${{ display: "flex", gap: "0.5rem" }}
-          >
-            <input
-              type="text"
-              value=${editName}
-              onInput=${(e) => setEditName(e.target.value)}
-            />
-            <button type="submit">Save</button>
-            <button type="button" onClick=${() => setEditing(false)}>
-              Cancel
-            </button>
-          </form>`
-        : html`<h1
-            onClick=${() => setEditing(true)}
-            style=${{ cursor: "pointer" }}
-          >
-            ${playlist.name}
-          </h1>`}
+      ${
+        editing
+          ? html`<form
+              onSubmit=${rename}
+              style=${{ display: "flex", gap: "0.5rem" }}
+            >
+              <input
+                type="text"
+                value=${editName}
+                onInput=${(e) => setEditName(e.target.value)}
+              />
+              <button type="submit">Save</button>
+              <button type="button" onClick=${() => setEditing(false)}>
+                Cancel
+              </button>
+            </form>`
+          : html`<h1
+              onClick=${() => setEditing(true)}
+              style=${{ cursor: "pointer" }}
+            >
+              ${playlist.name}
+            </h1>`
+      }
       <button class="playlist-back" onClick=${() => navigate("/playlists")}>
         Back
       </button>
     </div>
     <div class="playlist-items">
-      ${playlist.items.length === 0
-        ? html`<div class="playlist-empty">No items in this playlist</div>`
-        : playlist.items.map(
-            (item, i) =>
-              html`<div class="playlist-media-item">
-                <span class="playlist-media-pos">${i + 1}</span>
-                <div class="playlist-media-poster">
-                  ${item.poster_path
-                    ? html`<img src=${item.poster_path} alt=${item.title} />`
-                    : html`<div class="no-poster-sm">
-                        ${item.title?.charAt(0) || "?"}
-                      </div>`}
-                </div>
-                <span
-                  class="playlist-media-title"
-                  onClick=${() => navigate("/detail/" + item.media_id)}
-                  >${item.title || "Unknown"}</span
-                >
-                <span class="playlist-media-duration"
-                  >${item.duration
-                    ? Math.floor(item.duration / 60) + " min"
-                    : ""}</span
-                >
-                <button
-                  class="playlist-media-play"
-                  onClick=${() => navigate("/play/" + item.media_id)}
-                >
-                  Play
-                </button>
-                <button
-                  class="playlist-media-remove"
-                  onClick=${() => removeItem(item.id)}
-                >
-                  X
-                </button>
-              </div>`,
-          )}
+      ${
+        playlist.items.length === 0
+          ? html`<div class="playlist-empty">No items in this playlist</div>`
+          : playlist.items.map(
+              (item, i) =>
+                html`<div class="playlist-media-item">
+                  <span class="playlist-media-pos">${i + 1}</span>
+                  <div class="playlist-media-poster">
+                    ${
+                      item.poster_path
+                        ? html`<img
+                            src=${item.poster_path}
+                            alt=${item.title}
+                          />`
+                        : html`<div class="no-poster-sm">
+                            ${item.title?.charAt(0) || "?"}
+                          </div>`
+                    }
+                  </div>
+                  <span
+                    class="playlist-media-title"
+                    onClick=${() => navigate("/detail/" + item.media_id)}
+                    >${item.title || "Unknown"}</span
+                  >
+                  <span class="playlist-media-duration"
+                    >${
+                      item.duration
+                        ? Math.floor(item.duration / 60) + " min"
+                        : ""
+                    }</span
+                  >
+                  <button
+                    class="playlist-media-play"
+                    onClick=${() =>
+                      navigate(
+                        "/play/" +
+                          item.media_id +
+                          "?playlist=" +
+                          id +
+                          "&i=" +
+                          i,
+                      )}
+                  >
+                    Play
+                  </button>
+                  <button
+                    class="playlist-media-remove"
+                    onClick=${() => removeItem(item.id)}
+                  >
+                    X
+                  </button>
+                </div>`,
+            )
+      }
     </div>
   </div>`;
 }

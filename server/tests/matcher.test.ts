@@ -219,3 +219,72 @@ describe("applyManualMatch", () => {
     expect(result).toBe(false);
   });
 });
+
+describe("negative caching (incremental fetch)", () => {
+  it("remembers a no-match and skips the re-search on the next pass", async () => {
+    vi.mocked(searchMovie).mockResolvedValue([]);
+    expect(await matchAndApplyMetadata(db, 1, config)).toBe(false);
+    // A no-match is cached with an empty external_id so it isn't re-queried.
+    const row = db
+      .prepare(
+        "SELECT external_id FROM metadata_cache WHERE media_id = 1 AND provider = 'tmdb'",
+      )
+      .get() as { external_id: string } | undefined;
+    expect(row).toBeDefined();
+    expect(row!.external_id).toBe("");
+    // Second call short-circuits on the cache — TMDb is not hit again.
+    expect(await matchAndApplyMetadata(db, 1, config)).toBe(false);
+    expect(vi.mocked(searchMovie)).toHaveBeenCalledTimes(1);
+  });
+
+  it("re-searches once a no-match cache row goes stale", async () => {
+    const stale = Math.floor(Date.now() / 1000) - 31 * 24 * 60 * 60;
+    db.prepare(
+      "INSERT INTO metadata_cache (media_id, provider, external_id, data_json, fetched_at) VALUES (1, 'tmdb', '', '', ?)",
+    ).run(stale);
+    vi.mocked(searchMovie).mockResolvedValue([]);
+    await matchAndApplyMetadata(db, 1, config);
+    expect(vi.mocked(searchMovie)).toHaveBeenCalledTimes(1);
+  });
+
+  it("force bypasses a remembered no-match (manual re-match)", async () => {
+    const now = Math.floor(Date.now() / 1000);
+    db.prepare(
+      "INSERT INTO metadata_cache (media_id, provider, external_id, data_json, fetched_at) VALUES (1, 'tmdb', '', '', ?)",
+    ).run(now);
+    vi.mocked(searchMovie).mockResolvedValue([
+      { id: 7, title: "Test Movie" } as never,
+    ]);
+    vi.mocked(getMovieDetail).mockResolvedValue({
+      id: 7,
+      genres: [],
+      overview: "o",
+      poster_path: "/p.jpg",
+      backdrop_path: "/b.jpg",
+      vote_average: 5,
+    } as never);
+    // Without force: the fresh no-match short-circuits.
+    expect(await matchAndApplyMetadata(db, 1, config)).toBe(false);
+    expect(vi.mocked(searchMovie)).not.toHaveBeenCalled();
+    // With force: it re-searches and matches.
+    expect(await matchAndApplyMetadata(db, 1, config, true)).toBe(true);
+    expect(vi.mocked(searchMovie)).toHaveBeenCalledTimes(1);
+  });
+
+  it("a fresh positive match short-circuits without re-searching", async () => {
+    vi.mocked(searchMovie).mockResolvedValue([
+      { id: 42, title: "Test Movie" } as never,
+    ]);
+    vi.mocked(getMovieDetail).mockResolvedValue({
+      id: 42,
+      genres: [],
+      overview: "o",
+      poster_path: "/p.jpg",
+      backdrop_path: "/b.jpg",
+      vote_average: 5,
+    } as never);
+    expect(await matchAndApplyMetadata(db, 1, config)).toBe(true);
+    expect(await matchAndApplyMetadata(db, 1, config)).toBe(true);
+    expect(vi.mocked(searchMovie)).toHaveBeenCalledTimes(1);
+  });
+});

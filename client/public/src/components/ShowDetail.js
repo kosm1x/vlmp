@@ -86,7 +86,8 @@ export function ShowDetail({ id }) {
           html`<div class="detail-actions">
             <button
               class="detail-play-btn"
-              onClick=${() => navigate("/play/" + firstEpisode.media_id)}
+              onClick=${() =>
+                navigate("/play/" + firstEpisode.media_id + "?show=" + id)}
             >
               Play S${seasons[0].season_number} ·
               E${firstEpisode.episode_number}
@@ -100,9 +101,9 @@ export function ShowDetail({ id }) {
                 <button
                   class="show-season-header"
                   onClick=${() =>
-                  setOpenSeason(
-                    openSeason === s.season_number ? null : s.season_number,
-                  )}
+                    setOpenSeason(
+                      openSeason === s.season_number ? null : s.season_number,
+                    )}
                   aria-expanded=${openSeason === s.season_number}
                 >
                   <span
@@ -117,38 +118,38 @@ export function ShowDetail({ id }) {
                   >
                 </button>
                 ${
-                openSeason === s.season_number &&
-                html`<div class="show-episodes">
-                  ${s.episodes.map(
-                    (e) =>
-                      html`<div
-                        class="show-episode"
-                        key=${e.id}
-                        onClick=${() => navigate("/detail/" + e.media_id)}
-                      >
-                        <span class="show-episode-num"
-                          >${e.episode_number}</span
+                  openSeason === s.season_number &&
+                  html`<div class="show-episodes">
+                    ${s.episodes.map(
+                      (e) =>
+                        html`<div
+                          class="show-episode"
+                          key=${e.id}
+                          onClick=${() => navigate("/detail/" + e.media_id)}
                         >
-                        <span class="show-episode-title"
-                          >${e.title || `Episode ${e.episode_number}`}</span
-                        >
-                        <span class="show-episode-duration"
-                          >${fmtDuration(e.duration)}</span
-                        >
-                        <button
-                          class="lum-btn"
-                          onClick=${(ev) => {
-                          ev.stopPropagation();
-                          navigate("/play/" + e.media_id);
-                        }}
-                          aria-label=${`Play episode ${e.episode_number}`}
-                        >
-                          ▶ Play
-                        </button>
-                      </div>`,
-                  )}
-                </div>`
-              }
+                          <span class="show-episode-num"
+                            >${e.episode_number}</span
+                          >
+                          <span class="show-episode-title"
+                            >${e.title || `Episode ${e.episode_number}`}</span
+                          >
+                          <span class="show-episode-duration"
+                            >${fmtDuration(e.duration)}</span
+                          >
+                          <button
+                            class="lum-btn"
+                            onClick=${(ev) => {
+                            ev.stopPropagation();
+                            navigate("/play/" + e.media_id + "?show=" + id);
+                          }}
+                            aria-label=${`Play episode ${e.episode_number}`}
+                          >
+                            ▶ Play
+                          </button>
+                        </div>`,
+                    )}
+                  </div>`
+                }
               </div>`,
           )}
         </div>

@@ -9,48 +9,82 @@ import {
   fullBackdropUrl,
 } from "./tmdb.js";
 
-const CACHE_DAYS = 30;
+export const CACHE_DAYS = 30;
 
 interface CacheRow {
   fetched_at: number;
-  data_json: string;
+  external_id: string;
 }
 
-function isCacheFresh(db: Database.Database, mediaId: number): boolean {
+// The Unix-seconds cutoff before which a cache row is stale. Anything with
+// fetched_at > this is fresh (matched or negatively cached) and needs no fetch;
+// the incremental backfill uses the same cutoff to skip fresh rows in SQL.
+export function metadataStaleCutoff(): number {
+  return Math.floor(Date.now() / 1000) - CACHE_DAYS * 24 * 60 * 60;
+}
+
+// The fresh tmdb cache row for a media item, or null if none/stale. A row with
+// external_id '' is a remembered NO-MATCH (a title TMDb couldn't find) — kept so
+// unmatchable files aren't re-searched on every scan.
+function freshCacheRow(
+  db: Database.Database,
+  mediaId: number,
+): CacheRow | null {
   const row = db
     .prepare(
-      "SELECT fetched_at FROM metadata_cache WHERE media_id = ? AND provider = 'tmdb'",
+      "SELECT fetched_at, external_id FROM metadata_cache WHERE media_id = ? AND provider = 'tmdb'",
     )
     .get(mediaId) as CacheRow | undefined;
-  if (!row) return false;
-  const ageMs = Date.now() - row.fetched_at * 1000;
-  return ageMs < CACHE_DAYS * 24 * 60 * 60 * 1000;
+  if (!row || row.fetched_at <= metadataStaleCutoff()) return null;
+  return row;
 }
 
-function isShowCacheFresh(db: Database.Database, showId: number): boolean {
+function freshShowCacheRow(
+  db: Database.Database,
+  showId: number,
+): CacheRow | null {
   const row = db
     .prepare(
-      "SELECT fetched_at FROM metadata_cache WHERE show_id = ? AND provider = 'tmdb'",
+      "SELECT fetched_at, external_id FROM metadata_cache WHERE show_id = ? AND provider = 'tmdb'",
     )
     .get(showId) as CacheRow | undefined;
-  if (!row) return false;
-  const ageMs = Date.now() - row.fetched_at * 1000;
-  return ageMs < CACHE_DAYS * 24 * 60 * 60 * 1000;
+  if (!row || row.fetched_at <= metadataStaleCutoff()) return null;
+  return row;
+}
+
+// Remember that a search found nothing (external_id '', empty data), so the
+// item isn't re-queried until the row goes stale. Distinct from a real match.
+function cacheNoMatch(
+  db: Database.Database,
+  key: { mediaId: number } | { showId: number },
+): void {
+  const now = Math.floor(Date.now() / 1000);
+  if ("mediaId" in key)
+    db.prepare(
+      "INSERT INTO metadata_cache (media_id, provider, external_id, data_json, fetched_at) VALUES (?, 'tmdb', '', '', ?) ON CONFLICT(media_id, provider) DO UPDATE SET external_id = '', data_json = '', fetched_at = excluded.fetched_at",
+    ).run(key.mediaId, now);
+  else
+    db.prepare(
+      "INSERT INTO metadata_cache (show_id, provider, external_id, data_json, fetched_at) VALUES (?, 'tmdb', '', '', ?) ON CONFLICT(show_id, provider) DO UPDATE SET external_id = '', data_json = '', fetched_at = excluded.fetched_at",
+    ).run(key.showId, now);
 }
 
 export async function matchAndApplyMetadata(
   db: Database.Database,
   mediaId: number,
   config: Config,
+  // force: an explicit user "match this" re-searches even a remembered
+  // no-match; the automatic backfill leaves force off and respects the cache.
+  force = false,
 ): Promise<boolean> {
   if (!config.tmdbApiKey) return false;
-  if (isCacheFresh(db, mediaId)) return true;
+  const cached = force ? null : freshCacheRow(db, mediaId);
+  if (cached) return cached.external_id !== ""; // '' = remembered no-match
 
   const media = db
     .prepare("SELECT title, year, type FROM media_items WHERE id = ?")
     .get(mediaId) as
-    | { title: string; year: number | null; type: string }
-    | undefined;
+    { title: string; year: number | null; type: string } | undefined;
   if (!media) return false;
 
   const isTV = media.type === "episode";
@@ -58,7 +92,10 @@ export async function matchAndApplyMetadata(
     ? await searchTV(media.title, media.year, config.tmdbApiKey)
     : await searchMovie(media.title, media.year, config.tmdbApiKey);
 
-  if (results.length === 0) return false;
+  if (results.length === 0) {
+    cacheNoMatch(db, { mediaId });
+    return false;
+  }
 
   const best = results[0];
   if (isTV) {
@@ -103,9 +140,11 @@ export async function matchAndApplyShowMetadata(
   db: Database.Database,
   showId: number,
   config: Config,
+  force = false,
 ): Promise<boolean> {
   if (!config.tmdbApiKey) return false;
-  if (isShowCacheFresh(db, showId)) return true;
+  const cached = force ? null : freshShowCacheRow(db, showId);
+  if (cached) return cached.external_id !== ""; // '' = remembered no-match
 
   const show = db
     .prepare("SELECT title, year FROM tv_shows WHERE id = ?")
@@ -113,7 +152,10 @@ export async function matchAndApplyShowMetadata(
   if (!show) return false;
 
   const results = await searchTV(show.title, show.year, config.tmdbApiKey);
-  if (results.length === 0) return false;
+  if (results.length === 0) {
+    cacheNoMatch(db, { showId });
+    return false;
+  }
 
   const best = results[0];
   const detail = await getTVDetail(best.id, config.tmdbApiKey);

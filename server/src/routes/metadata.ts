@@ -7,6 +7,7 @@ import {
   matchAndApplyMetadata,
   matchAndApplyShowMetadata,
   applyManualMatch,
+  metadataStaleCutoff,
 } from "../metadata/matcher.js";
 import { parseIntParam } from "./params.js";
 import { getOrCreateThumb } from "../metadata/thumbs.js";
@@ -90,13 +91,14 @@ export function registerMetadataRoutes(
           config,
         );
       } else {
-        matched = await matchAndApplyMetadata(db, mediaId, config);
+        // Explicit admin action: bypass a remembered no-match and try again.
+        matched = await matchAndApplyMetadata(db, mediaId, config, true);
       }
       return { matched, media_id: mediaId };
     },
   );
 
-  app.post<{ Body: { folder_id?: number } }>(
+  app.post<{ Body: { folder_id?: number; full?: boolean } }>(
     "/admin/metadata/scan",
     { preHandler: [auth, adminOnly] },
     async (request, reply) => {
@@ -106,13 +108,31 @@ export function registerMetadataRoutes(
         return reply
           .code(409)
           .send({ error: "Metadata scan already in progress" });
-      const { folder_id } = request.body || {};
-      const condition = folder_id ? "WHERE m.library_folder_id = ?" : "";
-      const params = folder_id ? [folder_id] : [];
+      const { folder_id, full } = request.body || {};
+      // Incremental by default: only items with no artwork AND no fresh cache
+      // row — i.e. the newly added and the never-matched — so a re-run doesn't
+      // walk (and re-throttle over) the whole already-matched library. A
+      // remembered no-match caches with fetched_at, so unmatchable files are
+      // skipped too until the row goes stale. `full: true` forces every item.
+      const conditions: string[] = [];
+      const params: unknown[] = [];
+      if (!full) {
+        conditions.push(
+          "m.poster_path IS NULL AND NOT EXISTS (SELECT 1 FROM metadata_cache mc WHERE mc.media_id = m.id AND mc.provider = 'tmdb' AND mc.fetched_at > ?)",
+        );
+        params.push(metadataStaleCutoff());
+      }
+      if (folder_id) {
+        conditions.push("m.library_folder_id = ?");
+        params.push(folder_id);
+      }
+      const where = conditions.length
+        ? `WHERE ${conditions.join(" AND ")}`
+        : "";
       const items = db
         .prepare(
           `SELECT m.id, m.file_path, m.poster_path, f.path AS folder_path, f.category
-           FROM media_items m JOIN library_folders f ON f.id = m.library_folder_id ${condition}`,
+           FROM media_items m JOIN library_folders f ON f.id = m.library_folder_id ${where}`,
         )
         .all(...params) as {
         id: number;
@@ -198,7 +218,7 @@ export function registerMetadataRoutes(
       const showId = parseIntParam(request.params.showId, "showId");
       if (!config.tmdbApiKey)
         return reply.code(503).send({ error: "TMDb API key not configured" });
-      const matched = await matchAndApplyShowMetadata(db, showId, config);
+      const matched = await matchAndApplyShowMetadata(db, showId, config, true);
       return { matched, show_id: showId };
     },
   );

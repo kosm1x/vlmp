@@ -54,6 +54,9 @@ function App() {
       />`;
     return html`<${Player}
       mediaId=${pathParts[1]}
+      show=${route.params.show}
+      playlist=${route.params.playlist}
+      index=${route.params.i}
       onClose=${() => history.back()}
     />`;
   }

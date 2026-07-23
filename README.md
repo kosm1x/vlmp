@@ -6,7 +6,7 @@
 
 [![License](https://img.shields.io/badge/license-Apache--2.0-blue.svg)](LICENSE)
 ![Node](https://img.shields.io/badge/node-%3E%3D22-brightgreen.svg)
-![Tests](https://img.shields.io/badge/tests-355%20passing-brightgreen.svg)
+![Tests](https://img.shields.io/badge/tests-361%20passing-brightgreen.svg)
 
 </div>
 
@@ -38,9 +38,11 @@ If that scope fits how you actually watch, welcome.
 
 ## Features
 
-- **Adaptive bitrate streaming** — On-the-fly HLS transcoding via FFmpeg (1080p/720p/480p/360p)
+- **Adaptive bitrate streaming** — On-the-fly HLS transcoding via FFmpeg (1080p/720p/480p/360p); playback recovers from a transient segment hiccup instead of erroring out
+- **Continuous playback** — Start a series or playlist and it plays through to the end, auto-advancing episode to episode (or a manual ⏭ to skip)
 - **Direct play** — Zero-transcode for browser-compatible formats (H.264 MP4, WebM, etc.)
 - **Smart library scanning** — Recursive discovery with automatic classification (movies, TV, documentaries, education); sample/trailer video clips shorter than 2 minutes are ignored (`VLMP_MIN_DURATION_SECONDS`, 0 disables; audio is never filtered)
+- **Incremental metadata** — A metadata fetch only touches new/unmatched titles, not the whole library; unmatchable files are remembered so they aren't re-queried every run (`{"full": true}` forces a complete re-fetch)
 - **Custom categories** — Create/delete your own nav categories (defaults deletable too); each is "single titles" or "series"
 - **Series everywhere** — Season/episode detection from filenames (`S01E01`, `1x01`) and `Season N`/`Series N`/`Temporada N` folders, in ANY category — a Docs library can mix single documentaries with doc series; episodes group into show pages with per-season episode lists. Even episodes with no parseable number (bare titles, `E01`) still bundle under their show rather than scattering across the grid
 - **Full category, your way** — A category page loads its entire library at once (cached for instant re-browsing, no paging) and sorts on demand by title, recently added, random, or liked-first
