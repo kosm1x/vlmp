@@ -6,7 +6,7 @@
 
 [![License](https://img.shields.io/badge/license-Apache--2.0-blue.svg)](LICENSE)
 ![Node](https://img.shields.io/badge/node-%3E%3D22-brightgreen.svg)
-![Tests](https://img.shields.io/badge/tests-376%20passing-brightgreen.svg)
+![Tests](https://img.shields.io/badge/tests-378%20passing-brightgreen.svg)
 
 </div>
 
@@ -119,11 +119,72 @@ All configuration is via environment variables. The important ones:
 
 The full list (transcode limits, free-disk floor, sample-duration floor, scheduled backups, x264 preset, empty-trash-on-scan) is documented in [`.env.example`](.env.example).
 
+## Device discovery (`GET /api/info`)
+
+VLMP exposes a **public, no-auth** endpoint for clients and TV apps to identify the server before login:
+
+```
+GET /api/info
+```
+
+```json
+{
+  "name": "My VLMP",
+  "version": "0.1.9-4",
+  "publicUrl": "https://vlmp.example.com",
+  "fingerprint": "vlmp-a3f2b1",
+  "capabilities": ["hls", "subtitles", "playlists", "federation"]
+}
+```
+
+This is the preferred handshake for future native clients — scan the local network for `/api/info`, get a fingerprint, then prompt for credentials. No credentials are exposed: `fingerprint` is a SHA-256-derived public ID, not the private federation key. `capabilities` reflect live config — `subtitle-search` is added when an OpenSubtitles key is set.
+
+---
+
+## Resource footprint
+
+VLMP is built to run on modest hardware — a Raspberry Pi 4, a spare laptop, a $5 VPS. Representative numbers running v0.1.9 on a 2-core / 2 GB VPS serving a ~1 TB library:
+
+| State                     | RSS         | Notes                                      |
+| ------------------------- | ----------- | ------------------------------------------ |
+| Idle (no active playback) | ~60–80 MB   | Server + SQLite in WAL mode                |
+| 1 HLS transcode session   | ~120–160 MB | FFmpeg child process included              |
+| 4 concurrent HLS sessions | ~300–400 MB | At `VLMP_MAX_TRANSCODE_SESSIONS=4` default |
+
+For comparison: Jellyfin (non-hardware transcode) typically idles at 200–400 MB and scales steeply with sessions. Plex Media Server (free tier, software transcode) idles at ~300–500 MB. VLMP has no background agents, no analytics, no daemon processes — one Node process and the FFmpeg children it spawns on demand.
+
+> **Note:** Transcoding is CPU-bound. A single x264 session at `veryfast` preset fits comfortably on a Raspberry Pi 4 at 720p. 1080p on a Pi 4 may stutter; tune `VLMP_TRANSCODE_PRESET` to `ultrafast` or use direct play where possible.
+
+---
+
 ## Architecture
 
 Node.js 22 + TypeScript + Fastify 5 on the server; SQLite (WAL) for state; FFmpeg for transcoding; Preact + HTM + HLS.js on the client. Federation is HMAC-SHA256 signed with a 300s replay window and proxies all remote traffic through the local server, so clients never talk to peers directly.
 
 The full module map and REST API reference live in the source tree under [`server/src/`](server/src) — each subsystem (auth, scanner, streaming, federation, metadata, subtitles, recommendations) is its own directory with routes under `server/src/routes/`.
+
+## Roadmap
+
+### v0.2 — In progress
+
+| Feature                                                                | Status                   |
+| ---------------------------------------------------------------------- | ------------------------ |
+| **Lumiere Dark** — polished dark-mode reskin (home, library, player)   | 🔧 In progress           |
+| **Native TV client scaffold** — groundwork for Android TV / Apple TV   | 🔲 Planned               |
+| **GPU transcoding** — NVENC / VAAPI / VideoToolbox                     | 🔲 Planned               |
+| **Native TLS** — terminate HTTPS inside VLMP (no reverse proxy needed) | 🔲 Planned               |
+| **`/api/info` device discovery** ✅                                    | Shipped in v0.1.9 branch |
+
+### Shipped in v0.1.x
+
+- v0.1.9.4 — Auto-fallback direct-play → transcode + sub-360p fix
+- v0.1.9.3 — Re-probe null-codec files on first play
+- v0.1.9.2 — Rate-limit fix: data plane (HLS, thumbnails) exempt; control-plane 600/min
+- v0.1.9.1 — Incremental metadata, HLS retry, continuous play (auto-advance)
+- v0.1.9 — Bundle unnumbered series, sortable full-library grids
+- v0.1.8 — Server federation, algorithmic recommendations, library health dashboard
+
+---
 
 ## Contributing
 
