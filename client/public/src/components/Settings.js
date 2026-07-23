@@ -35,6 +35,8 @@ export function Settings() {
   const [newCatKind, setNewCatKind] = useState("movie");
   const [catPending, setCatPending] = useState(false);
   const [busyCat, setBusyCat] = useState(null);
+  const [editingCat, setEditingCat] = useState(null); // { id, label }
+  const [version, setVersion] = useState("");
   const selfId = getUserId();
 
   // Every setState below an await must check mountedRef — a resolve after
@@ -85,6 +87,9 @@ export function Settings() {
     load();
     loadUsers();
     loadCategories();
+    get("/version")
+      .then((d) => mountedRef.current && setVersion(d.version || ""))
+      .catch(() => {});
     loadMetaStatus(); // a backfill may already be running from a prior visit
     return () => {
       mountedRef.current = false;
@@ -136,6 +141,27 @@ export function Settings() {
         setCatError(err.message || "Failed to create category");
     } finally {
       if (mountedRef.current) setCatPending(false);
+    }
+  }
+
+  async function saveCategoryLabel(cat) {
+    const label = (editingCat?.label || "").trim();
+    if (!label || label === cat.label) {
+      setEditingCat(null);
+      return;
+    }
+    setBusyCat(cat.id);
+    setCatError("");
+    try {
+      await patch(`/admin/categories/${cat.id}`, { label });
+      if (!mountedRef.current) return;
+      setEditingCat(null);
+      await loadCategories(true);
+    } catch (err) {
+      if (mountedRef.current)
+        setCatError(err.message || "Failed to rename category");
+    } finally {
+      if (mountedRef.current) setBusyCat(null);
     }
   }
 
@@ -536,21 +562,66 @@ export function Settings() {
             ${categories.map(
               (c) =>
                 html`<tr key=${c.id}>
-                  <td data-label="Name">${c.label}</td>
+                  <td data-label="Name">
+                    ${
+                      editingCat?.id === c.id
+                        ? html`<input
+                            class="cat-rename-input"
+                            type="text"
+                            value=${editingCat.label}
+                            maxlength="80"
+                            autofocus
+                            onInput=${(e) =>
+                              setEditingCat({
+                                id: c.id,
+                                label: e.target.value,
+                              })}
+                            onKeyDown=${(e) => {
+                              if (e.key === "Enter") saveCategoryLabel(c);
+                              if (e.key === "Escape") setEditingCat(null);
+                            }}
+                          />`
+                        : c.label
+                    }
+                  </td>
                   <td class="folder-category" data-label="URL">#/${c.slug}</td>
                   <td class="folder-category" data-label="Content">
                     ${c.kind === "series" ? "series (episodes group into shows)" : "single titles"}
                   </td>
                   <td>
                     <div class="folder-actions">
-                      <button
-                        class="lum-btn danger"
-                        onClick=${() => removeCategory(c)}
-                        disabled=${busyCat === c.id}
-                        aria-label=${`Delete category ${c.label}`}
-                      >
-                        Delete
-                      </button>
+                      ${
+                        editingCat?.id === c.id
+                          ? html`<button
+                                class="lum-btn"
+                                onClick=${() => saveCategoryLabel(c)}
+                                disabled=${busyCat === c.id}
+                              >
+                                Save
+                              </button>
+                              <button
+                                class="lum-btn"
+                                onClick=${() => setEditingCat(null)}
+                              >
+                                Cancel
+                              </button>`
+                          : html`<button
+                                class="lum-btn"
+                                onClick=${() =>
+                                  setEditingCat({ id: c.id, label: c.label })}
+                                aria-label=${`Rename category ${c.label}`}
+                              >
+                                Rename
+                              </button>
+                              <button
+                                class="lum-btn danger"
+                                onClick=${() => removeCategory(c)}
+                                disabled=${busyCat === c.id}
+                                aria-label=${`Delete category ${c.label}`}
+                              >
+                                Delete
+                              </button>`
+                      }
                     </div>
                   </td>
                 </tr>`,
@@ -713,5 +784,6 @@ export function Settings() {
         <a class="lum-btn" href="#/servers">Federated Servers</a>
       </div>
     </section>
+    <div class="settings-version">VLMP ${version ? `v${version}` : ""}</div>
   </div>`;
 }

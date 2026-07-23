@@ -6,7 +6,7 @@
 
 [![License](https://img.shields.io/badge/license-Apache--2.0-blue.svg)](LICENSE)
 ![Node](https://img.shields.io/badge/node-%3E%3D22-brightgreen.svg)
-![Tests](https://img.shields.io/badge/tests-361%20passing-brightgreen.svg)
+![Tests](https://img.shields.io/badge/tests-366%20passing-brightgreen.svg)
 
 </div>
 
@@ -43,7 +43,8 @@ If that scope fits how you actually watch, welcome.
 - **Direct play** — Zero-transcode for browser-compatible formats (H.264 MP4, WebM, etc.)
 - **Smart library scanning** — Recursive discovery with automatic classification (movies, TV, documentaries, education); sample/trailer video clips shorter than 2 minutes are ignored (`VLMP_MIN_DURATION_SECONDS`, 0 disables; audio is never filtered)
 - **Incremental metadata** — A metadata fetch only touches new/unmatched titles, not the whole library; unmatchable files are remembered so they aren't re-queried every run (`{"full": true}` forces a complete re-fetch)
-- **Custom categories** — Create/delete your own nav categories (defaults deletable too); each is "single titles" or "series"
+- **Custom categories** — Create, rename, or delete your own nav categories (defaults included); each is "single titles" or "series". The category bar scrolls, so any number of them stays reachable
+- **Playback has priority** — Streaming (HLS segments, direct play) is never rate-limited, so background work — a metadata fetch, browsing, a busy household — can't 429 what's playing (`VLMP_RATE_LIMIT_MAX` tunes the control-plane ceiling, default 600/min)
 - **Series everywhere** — Season/episode detection from filenames (`S01E01`, `1x01`) and `Season N`/`Series N`/`Temporada N` folders, in ANY category — a Docs library can mix single documentaries with doc series; episodes group into show pages with per-season episode lists. Even episodes with no parseable number (bare titles, `E01`) still bundle under their show rather than scattering across the grid
 - **Full category, your way** — A category page loads its entire library at once (cached for instant re-browsing, no paging) and sorts on demand by title, recently added, random, or liked-first
 - **OpenSubtitles integration** — Subtitle availability shown on every detail page; search and apply subtitles from opensubtitles.com in two clicks (free API key required)

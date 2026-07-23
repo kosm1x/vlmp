@@ -8,6 +8,7 @@ import {
   getMissingFiles,
   cleanupOrphaned,
 } from "../ai/health.js";
+import { readAppVersion } from "../version.js";
 
 export function registerHealthRoutes(
   app: FastifyInstance,
@@ -15,6 +16,13 @@ export function registerHealthRoutes(
   config: Config,
 ): void {
   const auth = authMiddleware(config, db);
+  const appVersion = readAppVersion();
+
+  // GET /version — the running app version (any logged-in user; shown in
+  // Settings). Read once at registration, not per request.
+  app.get("/version", { preHandler: auth }, async () => ({
+    version: appVersion,
+  }));
 
   // GET /admin/health — Full health report
   app.get("/admin/health", { preHandler: [auth, adminOnly] }, async () => {

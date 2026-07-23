@@ -22,6 +22,7 @@ import {
   listCategories,
   getCategoryBySlug,
   createCategory,
+  updateCategory,
   deleteCategory,
   type CategoryKind,
 } from "../media/categories.js";
@@ -88,6 +89,30 @@ export function registerLibraryRoutes(
       const result = createCategory(db, request.body);
       if (!result.ok) return reply.code(409).send({ error: result.error });
       return reply.code(201).send(result.category);
+    },
+  );
+
+  app.patch<{ Params: { id: string }; Body: { label: string } }>(
+    "/admin/categories/:id",
+    {
+      schema: {
+        body: {
+          type: "object",
+          required: ["label"],
+          properties: {
+            label: { type: "string", minLength: 1, maxLength: 80 },
+          },
+          additionalProperties: false,
+        },
+      },
+      preHandler: [auth, adminOnly],
+    },
+    async (request, reply) => {
+      const id = parseIntParam(request.params.id, "id");
+      const result = updateCategory(db, id, request.body);
+      if (!result.ok)
+        return reply.code(result.status).send({ error: result.error });
+      return reply.send(result.category);
     },
   );
 

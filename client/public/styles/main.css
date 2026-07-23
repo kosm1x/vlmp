@@ -118,16 +118,41 @@ body {
   display: flex;
   gap: 1.25rem;
   list-style: none;
+  align-items: center;
+}
+.nav-links li {
+  flex: 0 0 auto;
 }
 .nav-links a {
   color: var(--text-dim);
   text-decoration: none;
   font-size: 0.9rem;
   transition: color 0.15s;
+  white-space: nowrap;
 }
 .nav-links a:hover,
 .nav-links a.active {
   color: var(--text);
+}
+/* Home + categories: take the middle space and scroll horizontally so an
+   arbitrary number of categories never crowds out the fixed sections. */
+.nav-scroll {
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow-x: auto;
+  overflow-y: hidden;
+  scrollbar-width: thin;
+  -webkit-overflow-scrolling: touch;
+}
+.nav-scroll::-webkit-scrollbar {
+  height: 4px;
+}
+.nav-scroll::-webkit-scrollbar-thumb {
+  background: var(--border, #333);
+  border-radius: 2px;
+}
+.nav-actions {
+  flex: 0 0 auto;
 }
 .nav-search {
   margin-left: auto;

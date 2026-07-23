@@ -2,6 +2,7 @@ import Fastify from "fastify";
 import cors from "@fastify/cors";
 import rateLimit from "@fastify/rate-limit";
 import fastifyStatic from "@fastify/static";
+import { isDataPlanePath } from "./rate-limit.js";
 import { resolve } from "node:path";
 import { existsSync, mkdirSync, rmSync } from "node:fs";
 import { execFile } from "node:child_process";
@@ -117,10 +118,19 @@ await app.register(cors, {
   origin:
     process.env.VLMP_CORS_ORIGIN?.split(",").map((s) => s.trim()) || false,
 });
+// The limiter blunts abuse of the control plane (auth keeps its own tighter
+// per-route caps). The media data plane is exempted (see isDataPlanePath) so a
+// long watch or background work can never 429 the segment requests playback
+// depends on — playback has precedence.
+const rateLimitMax = Math.max(
+  60,
+  parseInt(process.env.VLMP_RATE_LIMIT_MAX || "600", 10) || 600,
+);
 await app.register(rateLimit, {
   global: true,
-  max: 120,
+  max: rateLimitMax,
   timeWindow: "1 minute",
+  allowList: (req) => isDataPlanePath(req.url.split("?")[0]),
 });
 
 // Client dir depends on how we're running: tsx (server/src → root/client) and

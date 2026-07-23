@@ -278,6 +278,23 @@ body {
   font-size: 0.875rem;
   padding: 1.5rem 0.75rem;
 }
+.cat-rename-input {
+  width: 100%;
+  max-width: 16rem;
+  padding: 0.35rem 0.5rem;
+  background: var(--lum-surface, #1a1a1a);
+  color: inherit;
+  border: 1px solid var(--lum-accent, #4a9);
+  border-radius: 6px;
+  font-size: 0.9rem;
+}
+.settings-version {
+  color: var(--lum-text-secondary, #888);
+  font-size: 0.8rem;
+  text-align: center;
+  padding: 1.5rem 0 0.5rem;
+  letter-spacing: 0.02em;
+}
 
 @media (max-width: 640px) {
   .settings-page {

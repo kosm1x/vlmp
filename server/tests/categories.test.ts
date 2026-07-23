@@ -204,6 +204,45 @@ describe("categories — routes", () => {
     expect(gone.statusCode).toBe(404);
   });
 
+  it("PATCH /admin/categories/:id renames the label (slug immutable), admin-only", async () => {
+    const cats = listCategories(db);
+    const tv = cats.find((c) => c.slug === "tv")!;
+    const auth = { authorization: `Bearer ${adminToken}` };
+    const denied = await app.inject({
+      method: "PATCH",
+      url: `/admin/categories/${tv.id}`,
+      headers: { authorization: `Bearer ${userToken}` },
+      payload: { label: "Shows" },
+    });
+    expect(denied.statusCode).toBe(403);
+    const res = await app.inject({
+      method: "PATCH",
+      url: `/admin/categories/${tv.id}`,
+      headers: auth,
+      payload: { label: "Shows" },
+    });
+    expect(res.statusCode).toBe(200);
+    expect(res.json()).toMatchObject({ slug: "tv", label: "Shows" });
+    // Slug is unchanged; the folders' category key still resolves.
+    expect(listCategories(db).find((c) => c.slug === "tv")!.label).toBe(
+      "Shows",
+    );
+    const missing = await app.inject({
+      method: "PATCH",
+      url: "/admin/categories/9999",
+      headers: auth,
+      payload: { label: "X" },
+    });
+    expect(missing.statusCode).toBe(404);
+    const empty = await app.inject({
+      method: "PATCH",
+      url: `/admin/categories/${tv.id}`,
+      headers: auth,
+      payload: { label: "" },
+    });
+    expect(empty.statusCode).toBe(400); // schema minLength
+  });
+
   it("POST /admin/folders rejects a category that does not exist", async () => {
     const res = await app.inject({
       method: "POST",

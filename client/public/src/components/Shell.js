@@ -38,7 +38,10 @@ export function Shell({ children }) {
       >
         VLMP
       </div>
-      <ul class="nav-links">
+      <!-- Home + the library categories share a horizontally-scrollable strip
+           so any number of categories stays reachable without pushing the app
+           sections or search off-screen. -->
+      <ul class="nav-links nav-scroll">
         <li><a href="#/" aria-label="Home">Home</a></li>
         ${categories.map(
           (c) =>
@@ -46,6 +49,8 @@ export function Shell({ children }) {
               <a href=${"#/" + c.slug} aria-label=${c.label}>${c.label}</a>
             </li>`,
         )}
+      </ul>
+      <ul class="nav-links nav-actions">
         <li><a href="#/playlists" aria-label="Playlists">Playlists</a></li>
         <li><a href="#/servers" aria-label="Servers">Servers</a></li>
         ${

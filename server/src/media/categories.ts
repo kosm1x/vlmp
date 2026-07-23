@@ -77,6 +77,26 @@ export function createCategory(
   return { ok: true, category };
 }
 
+export type UpdateCategoryResult =
+  | { ok: true; category: Category }
+  | { ok: false; status: 400 | 404; error: string };
+
+// Rename a category's display label. The slug is immutable — it's a client
+// route path and the folders' stored key, so renaming touches only the label.
+export function updateCategory(
+  db: Database.Database,
+  id: number,
+  input: { label: string },
+): UpdateCategoryResult {
+  const label = input.label.trim();
+  if (!label) return { ok: false, status: 400, error: "Label is required" };
+  const category = db
+    .prepare("UPDATE categories SET label = ? WHERE id = ? RETURNING *")
+    .get(label, id) as Category | undefined;
+  if (!category) return { ok: false, status: 404, error: "Category not found" };
+  return { ok: true, category };
+}
+
 export type DeleteCategoryResult =
   { ok: true } | { ok: false; status: 404 | 409; error: string };
 
