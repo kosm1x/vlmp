@@ -42,6 +42,13 @@ CREATE TABLE IF NOT EXISTS media_items (
   duration INTEGER,
   codec_video TEXT,
   codec_audio TEXT,
+  -- Video pixel format: browsers can't decode 10-/12-bit even when the codec
+  -- name (h264) is direct-playable, so the direct-play decision needs it.
+  pix_fmt TEXT,
+  -- Unix time of the last successful ffprobe (NULL = never probed). The play
+  -- route re-probes NULL rows once so a folder scanned before ffprobe existed
+  -- still gets a correct direct-vs-transcode decision.
+  probed_at INTEGER,
   resolution_width INTEGER,
   resolution_height INTEGER,
   bitrate INTEGER,
@@ -258,6 +265,10 @@ export function initSchema(db: Database.Database): void {
   );
   // Existing episodes were all number-parsed by the old linker, so 0 is correct.
   addColumnIfMissing(db, "episodes", "synthetic", "INTEGER NOT NULL DEFAULT 0");
+  // Pre-existing rows have unknown pix_fmt and probe state; NULL probed_at makes
+  // the play route re-probe them once to backfill both (and fix direct play).
+  addColumnIfMissing(db, "media_items", "pix_fmt", "TEXT");
+  addColumnIfMissing(db, "media_items", "probed_at", "INTEGER");
   db.exec(INDEXES);
   db.exec(
     `CREATE TABLE IF NOT EXISTS schema_version (version INTEGER NOT NULL);`,

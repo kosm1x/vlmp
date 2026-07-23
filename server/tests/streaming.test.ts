@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { canDirectPlay } from "../src/streaming/direct.js";
+import { canDirectPlay, isBrowserSafePixFmt } from "../src/streaming/direct.js";
 import {
   getAvailableProfiles,
   generateMasterPlaylist,
@@ -30,6 +30,27 @@ describe("direct play", () => {
   });
   it("rejects audio-only dts", () => {
     expect(canDirectPlay(null, "dts", ".mkv")).toBe(false);
+  });
+  // Fail-open on unknown codecs: an mp4/m4v/webm with no codec data passes.
+  // This is exactly why the start route re-probes null-codec media before
+  // trusting a "direct" decision (a folder scanned without ffprobe stores null,
+  // and an undecodable file served direct aborts silently in the browser).
+  it("fails OPEN when both codecs are unknown in a browser container", () => {
+    expect(canDirectPlay(null, null, ".mp4")).toBe(true);
+  });
+});
+
+describe("isBrowserSafePixFmt (bit depth)", () => {
+  it("accepts 8-bit and unknown", () => {
+    expect(isBrowserSafePixFmt("yuv420p")).toBe(true);
+    expect(isBrowserSafePixFmt("yuvj420p")).toBe(true);
+    expect(isBrowserSafePixFmt(null)).toBe(true);
+  });
+  it("rejects 10-/12-bit (Hi10P, HDR) the browser can't decode", () => {
+    expect(isBrowserSafePixFmt("yuv420p10le")).toBe(false);
+    expect(isBrowserSafePixFmt("yuv444p10le")).toBe(false);
+    expect(isBrowserSafePixFmt("p010le")).toBe(false);
+    expect(isBrowserSafePixFmt("yuv420p12le")).toBe(false);
   });
 });
 

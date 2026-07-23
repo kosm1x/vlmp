@@ -189,7 +189,7 @@ export async function scanLibraryFolder(
       kind: "movie" as const,
     };
     const insertMedia = db.prepare(
-      "INSERT OR IGNORE INTO media_items (library_folder_id, type, file_path, file_size, title, sort_title, year, codec_video, codec_audio, resolution_width, resolution_height, bitrate, duration, audio_tracks) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+      "INSERT OR IGNORE INTO media_items (library_folder_id, type, file_path, file_size, title, sort_title, year, codec_video, codec_audio, pix_fmt, probed_at, resolution_width, resolution_height, bitrate, duration, audio_tracks) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
     );
     for (const file of files) {
       const classified = classifyMedia(file.path, folder.path, category);
@@ -251,6 +251,10 @@ export async function scanLibraryFolder(
         classified.year,
         probe?.codecVideo || null,
         probe?.codecAudio || null,
+        probe?.pixFmt || null,
+        // Only a successful probe counts as "probed"; a failed one leaves
+        // probed_at NULL so the play route re-probes later.
+        probe ? Math.floor(Date.now() / 1000) : null,
         probe?.width || null,
         probe?.height || null,
         probe?.bitrate || null,

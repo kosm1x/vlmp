@@ -5,6 +5,10 @@ export interface ProbeResult {
   duration: number;
   codecVideo: string | null;
   codecAudio: string | null;
+  // Video pixel format (e.g. "yuv420p" 8-bit vs "yuv420p10le" 10-bit). Browsers
+  // decode 8-bit H.264/HEVC but not 10-bit, even though the codec NAME is the
+  // same — so the direct-play check needs bit depth, not just the codec name.
+  pixFmt: string | null;
   width: number | null;
   height: number | null;
   bitrate: number | null;
@@ -132,6 +136,7 @@ function parseProbeOutput(raw: string): ProbeResult {
     duration: Math.round(parseFloat(format.duration || "0")),
     codecVideo: videoStream ? (videoStream.codec_name as string) : null,
     codecAudio: audioStream ? (audioStream.codec_name as string) : null,
+    pixFmt: videoStream ? ((videoStream.pix_fmt as string) ?? null) : null,
     width: videoStream ? (videoStream.width as number) : null,
     height: videoStream ? (videoStream.height as number) : null,
     bitrate: format.bit_rate ? parseInt(format.bit_rate, 10) : null,

@@ -392,6 +392,22 @@ export function Player({
         goNext();
       }}
       onClick=${togglePlay}
+      onError=${() => {
+        const v = videoRef.current;
+        // hls.js owns error handling for the transcode path (see its ERROR
+        // handler). Only surface DIRECT-play failures here — a decode /
+        // unsupported-source error means the browser can't play this file's
+        // codec, which otherwise fails silently ("stream closed prematurely"
+        // server-side, blank player client-side).
+        if (
+          sessionRef.current?.mode === "direct" &&
+          v?.error &&
+          (v.error.code === 3 || v.error.code === 4)
+        )
+          setError(
+            "This video's format can't be played in the browser. It needs transcoding — make sure FFmpeg is installed on the server, then try again.",
+          );
+      }}
       autoplay
       crossorigin="anonymous"
     >

@@ -6,7 +6,8 @@ import { isPathInside } from "../paths.js";
 import type { Config } from "../config.js";
 import { authMiddleware, adminOnly } from "../auth/middleware.js";
 import { validateGuestPass } from "../auth/guest.js";
-import { canDirectPlay, serveDirectFile } from "../streaming/direct.js";
+import { serveDirectFile } from "../streaming/direct.js";
+import { resolvePlayback } from "../streaming/playback-decision.js";
 import { isMediaFolderVisible } from "../media/library.js";
 import {
   getAvailableProfiles,
@@ -30,6 +31,8 @@ interface MediaRow {
   file_path: string;
   codec_video: string | null;
   codec_audio: string | null;
+  pix_fmt: string | null;
+  probed_at: number | null;
   resolution_width: number | null;
   resolution_height: number | null;
   duration: number | null;
@@ -39,7 +42,9 @@ interface MediaRow {
 function getMediaById(db: Database.Database, id: number): MediaRow | undefined {
   return db
     .prepare(
-      "SELECT id, file_path, codec_video, codec_audio, resolution_width, resolution_height, duration, audio_tracks FROM media_items WHERE id = ?",
+      // SELECT * so a new column (e.g. pix_fmt/probed_at) can't be silently
+      // dropped from the playback decision by a stale column list.
+      "SELECT * FROM media_items WHERE id = ?",
     )
     .get(id) as MediaRow | undefined;
 }
@@ -90,10 +95,14 @@ export function registerPlaybackRoutes(
       if (!existsSync(media.file_path))
         return reply.code(404).send({ error: "Media file not found on disk" });
       const ext = extname(media.file_path).toLowerCase();
-      const direct = canDirectPlay(media.codec_video, media.codec_audio, ext);
-      const profiles = direct
-        ? []
-        : getAvailableProfiles(media.resolution_width, media.resolution_height);
+      const { direct, width, height } = await resolvePlayback(
+        db,
+        media,
+        ext,
+        config,
+        request.log,
+      );
+      const profiles = direct ? [] : getAvailableProfiles(width, height);
       if (!direct && !(await hasEnoughDiskSpace(config)))
         return reply
           .code(507)
@@ -146,10 +155,14 @@ export function registerPlaybackRoutes(
       const media = getMediaById(db, result.mediaId);
       if (!media) return reply.code(404).send({ error: "Media not found" });
       const ext = extname(media.file_path).toLowerCase();
-      const direct = canDirectPlay(media.codec_video, media.codec_audio, ext);
-      const profiles = direct
-        ? []
-        : getAvailableProfiles(media.resolution_width, media.resolution_height);
+      const { direct, width, height } = await resolvePlayback(
+        db,
+        media,
+        ext,
+        config,
+        request.log,
+      );
+      const profiles = direct ? [] : getAvailableProfiles(width, height);
       if (!direct && !(await hasEnoughDiskSpace(config)))
         return reply
           .code(507)

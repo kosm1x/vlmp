@@ -35,6 +35,15 @@ export function canDirectPlay(
   return containerOk && videoOk && audioOk;
 }
 
+// A codec whose NAME passes canDirectPlay can still be undecodable in-browser
+// at >8-bit depth (10-bit "Hi10P" H.264, HDR HEVC). pix_fmt reveals it. Unknown
+// (null) pix_fmt is treated as safe — we only block on positive evidence, never
+// force a transcode on missing info.
+export function isBrowserSafePixFmt(pixFmt: string | null): boolean {
+  if (!pixFmt) return true;
+  return !/10le|10be|12le|12be|p0(10|12|16)|10bit|12bit/i.test(pixFmt);
+}
+
 export async function serveDirectFile(
   filePath: string,
   request: FastifyRequest,
