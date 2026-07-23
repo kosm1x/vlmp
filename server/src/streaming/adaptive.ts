@@ -53,7 +53,11 @@ export function getAvailableProfiles(
 ): TranscodeProfile[] {
   if (!sourceWidth || !sourceHeight)
     return PROFILES.filter((p) => p.height <= 720);
-  return PROFILES.filter((p) => p.height <= sourceHeight);
+  const fit = PROFILES.filter((p) => p.height <= sourceHeight);
+  // A source smaller than the lowest rung (e.g. 320x240) still needs a
+  // transcode target when it can't direct-play — falling through to an empty
+  // list would emit an unplayable master playlist. Use the lowest profile.
+  return fit.length > 0 ? fit : [PROFILES[PROFILES.length - 1]];
 }
 
 // The variant playlist is synthesized from the probed media duration instead

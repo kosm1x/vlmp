@@ -8,7 +8,7 @@ this checklist passes on real hardware).
 ## Installer (recommended)
 
 Download `vlmp-setup-<version>-win-x64.exe` from
-<https://github.com/kosm1x/vlmp/releases> (v0.1.9.3 published 2026-07-23;
+<https://github.com/kosm1x/vlmp/releases> (v0.1.9.4 published 2026-07-23;
 SmartScreen warns on unsigned installers — "More info → Run anyway").
 Do not run v0.1.5 — its seek/quality-switch timestamps were broken
 (fixed in v0.1.6).

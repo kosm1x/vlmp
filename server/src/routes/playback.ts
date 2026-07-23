@@ -68,6 +68,7 @@ export function registerPlaybackRoutes(
       bandwidth_kbps?: number;
       start_time?: number;
       audio_track?: number;
+      force_transcode?: boolean;
     };
   }>(
     "/stream/:id/start",
@@ -79,6 +80,7 @@ export function registerPlaybackRoutes(
             start_time: { type: "number", minimum: 0 },
             audio_track: { type: "number", minimum: 0 },
             bandwidth_kbps: { type: "number", minimum: 0 },
+            force_transcode: { type: "boolean" },
           },
           additionalProperties: false,
         },
@@ -95,13 +97,18 @@ export function registerPlaybackRoutes(
       if (!existsSync(media.file_path))
         return reply.code(404).send({ error: "Media file not found on disk" });
       const ext = extname(media.file_path).toLowerCase();
-      const { direct, width, height } = await resolvePlayback(
+      const decision = await resolvePlayback(
         db,
         media,
         ext,
         config,
         request.log,
       );
+      const { width, height } = decision;
+      // The client falls back to force_transcode when a "direct-playable" file
+      // still can't be decoded in THIS browser (e.g. AV1 where the browser
+      // lacks support) — the browser is the real authority, so honor it.
+      const direct = decision.direct && !request.body.force_transcode;
       const profiles = direct ? [] : getAvailableProfiles(width, height);
       if (!direct && !(await hasEnoughDiskSpace(config)))
         return reply

@@ -73,6 +73,11 @@ describe("adaptive profiles", () => {
       true,
     );
   });
+  it("never returns empty — a sub-360p source falls back to the lowest rung", () => {
+    const p = getAvailableProfiles(320, 240);
+    expect(p).toHaveLength(1);
+    expect(p[0].name).toBe("360p");
+  });
 });
 
 describe("variant playlist (synthesized VOD)", () => {

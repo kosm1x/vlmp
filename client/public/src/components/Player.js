@@ -40,6 +40,13 @@ export function Player({
     // of stepping back through every auto-advanced item.
     if (nextHref) navigate(nextHref, true);
   }
+  // A "direct-playable" codec can still be undecodable in THIS browser (AV1
+  // without support, 4:2:2/4:4:4 H.264, …) — the browser is the real authority.
+  // On a direct-play decode error we retry once with force_transcode instead of
+  // giving up. Reset per media (a new item gets a fresh direct attempt); a retry
+  // bumps retryNonce to re-run the init effect.
+  const forceTranscodeRef = useRef(false);
+  const [retryNonce, setRetryNonce] = useState(0);
   // The stream timeline is absolute media time for BOTH direct play and HLS:
   // the server synthesizes a full VOD playlist from the real duration, so
   // resume is a plain seek and the bar needs no offset arithmetic.
@@ -56,6 +63,12 @@ export function Player({
   const [activeSubtitle, setActiveSubtitle] = useState(null);
   const [error, setError] = useState("");
   const [loading, setLoading] = useState(true);
+
+  // A new media item gets a fresh direct-play attempt; only a same-item retry
+  // keeps force_transcode. Declared before the init effect so it resets first.
+  useEffect(() => {
+    forceTranscodeRef.current = false;
+  }, [mediaId]);
 
   useEffect(() => {
     let cancelled = false;
@@ -90,7 +103,10 @@ export function Player({
         const streamUrl = federated
           ? `/federation/servers/${serverId}/stream/${mediaId}/start`
           : `/stream/${mediaId}/start`;
-        const sd = await post(streamUrl, {});
+        const sd = await post(
+          streamUrl,
+          federated ? {} : { force_transcode: forceTranscodeRef.current },
+        );
         if (cancelled) {
           // Navigated away while the session was starting: the effect cleanup
           // already ran (sessionRef was still null), so tear down the session
@@ -181,6 +197,12 @@ export function Player({
             once: true,
           });
           video.src = sd.url;
+        } else {
+          // Transcode stream but the browser has no HLS support at all — no src
+          // ever gets set, so say so instead of a silent forever-loading player.
+          setError(
+            "Your browser can't play this stream (no HLS support). Try a recent Chrome, Edge, or Safari.",
+          );
         }
         setLoading(false);
       } catch (err) {
@@ -199,7 +221,8 @@ export function Player({
       // component swap) — otherwise its ffmpeg jobs run for 10 idle minutes.
       endSession();
     };
-  }, [mediaId]);
+    // retryNonce re-runs init in transcode mode after a direct-play decode error.
+  }, [mediaId, retryNonce]);
 
   // Resolve the next item's href in the show/playlist this player was opened
   // from. Playlists carry the current position (`index`) so a title that
@@ -395,18 +418,28 @@ export function Player({
       onError=${() => {
         const v = videoRef.current;
         // hls.js owns error handling for the transcode path (see its ERROR
-        // handler). Only surface DIRECT-play failures here — a decode /
-        // unsupported-source error means the browser can't play this file's
-        // codec, which otherwise fails silently ("stream closed prematurely"
-        // server-side, blank player client-side).
+        // handler). Only handle DIRECT-play failures here — a decode /
+        // unsupported-source error means the browser can't decode this file's
+        // codec even though the server judged it directly playable.
         if (
-          sessionRef.current?.mode === "direct" &&
-          v?.error &&
-          (v.error.code === 3 || v.error.code === 4)
+          sessionRef.current?.mode !== "direct" ||
+          !v?.error ||
+          (v.error.code !== 3 && v.error.code !== 4)
         )
-          setError(
-            "This video's format can't be played in the browser. It needs transcoding — make sure FFmpeg is installed on the server, then try again.",
-          );
+          return;
+        // The browser is the real authority on what it can decode. Retry once,
+        // forcing the server to transcode, instead of failing (handles AV1
+        // without browser support, 4:2:2/4:4:4 H.264, etc.). Federated playback
+        // can't force transcode through the proxy, so it goes straight to the
+        // error.
+        if (!federated && !forceTranscodeRef.current) {
+          forceTranscodeRef.current = true;
+          setRetryNonce((n) => n + 1);
+          return;
+        }
+        setError(
+          "This video can't be played in the browser and transcoding it failed — check that FFmpeg is installed and working on the server.",
+        );
       }}
       autoplay
       crossorigin="anonymous"
