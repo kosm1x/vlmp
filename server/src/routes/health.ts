@@ -18,6 +18,16 @@ export function registerHealthRoutes(
   const auth = authMiddleware(config, db);
   const appVersion = readAppVersion();
 
+  // GET /api/info — public device-discovery endpoint (no auth required).
+  // TV apps and remote clients use this to identify the server before login.
+  app.get("/api/info", async () => ({
+    name: config.serverName,
+    version: appVersion,
+    publicUrl: config.publicUrl,
+    fingerprint: config.serverFingerprint,
+    capabilities: ["hls", "subtitles", "playlists", "federation"],
+  }));
+
   // GET /version — the running app version (any logged-in user; shown in
   // Settings). Read once at registration, not per request.
   app.get("/version", { preHandler: auth }, async () => ({
