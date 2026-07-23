@@ -44,8 +44,10 @@ describe("GET /api/info", () => {
     expect(typeof body.version).toBe("string");
     expect(body.version).toMatch(/^\d+\.\d+/);
     expect(typeof body.publicUrl).toBe("string");
-    expect(typeof body.fingerprint).toBe("string");
+    // Derived public discovery ID, never the raw federation fingerprint.
+    expect(body.fingerprint).toMatch(/^vlmp-[0-9a-f]{6}$/);
     expect(Array.isArray(body.capabilities)).toBe(true);
     expect(body.capabilities).toContain("hls");
+    expect(body.capabilities).toContain("subtitles");
   });
 });

@@ -137,7 +137,7 @@ GET /api/info
 }
 ```
 
-This is the preferred handshake for future native clients — scan the local network for `/api/info`, get a fingerprint, then prompt for credentials. No credentials are exposed.
+This is the preferred handshake for future native clients — scan the local network for `/api/info`, get a fingerprint, then prompt for credentials. No credentials are exposed: `fingerprint` is a SHA-256-derived public ID, not the private federation key. `capabilities` reflect live config — `subtitle-search` is added when an OpenSubtitles key is set.
 
 ---
 
@@ -145,10 +145,10 @@ This is the preferred handshake for future native clients — scan the local net
 
 VLMP is built to run on modest hardware — a Raspberry Pi 4, a spare laptop, a $5 VPS. Representative numbers running v0.1.9 on a 2-core / 2 GB VPS serving a ~1 TB library:
 
-| State | RSS | Notes |
-|-------|-----|-------|
-| Idle (no active playback) | ~60–80 MB | Server + SQLite in WAL mode |
-| 1 HLS transcode session | ~120–160 MB | FFmpeg child process included |
+| State                     | RSS         | Notes                                      |
+| ------------------------- | ----------- | ------------------------------------------ |
+| Idle (no active playback) | ~60–80 MB   | Server + SQLite in WAL mode                |
+| 1 HLS transcode session   | ~120–160 MB | FFmpeg child process included              |
 | 4 concurrent HLS sessions | ~300–400 MB | At `VLMP_MAX_TRANSCODE_SESSIONS=4` default |
 
 For comparison: Jellyfin (non-hardware transcode) typically idles at 200–400 MB and scales steeply with sessions. Plex Media Server (free tier, software transcode) idles at ~300–500 MB. VLMP has no background agents, no analytics, no daemon processes — one Node process and the FFmpeg children it spawns on demand.
@@ -167,13 +167,13 @@ The full module map and REST API reference live in the source tree under [`serve
 
 ### v0.2 — In progress
 
-| Feature | Status |
-|---------|--------|
-| **Lumiere Dark** — polished dark-mode reskin (home, library, player) | 🔧 In progress |
-| **Native TV client scaffold** — groundwork for Android TV / Apple TV | 🔲 Planned |
-| **GPU transcoding** — NVENC / VAAPI / VideoToolbox | 🔲 Planned |
-| **Native TLS** — terminate HTTPS inside VLMP (no reverse proxy needed) | 🔲 Planned |
-| **`/api/info` device discovery** ✅ | Shipped in v0.1.9 branch |
+| Feature                                                                | Status                   |
+| ---------------------------------------------------------------------- | ------------------------ |
+| **Lumiere Dark** — polished dark-mode reskin (home, library, player)   | 🔧 In progress           |
+| **Native TV client scaffold** — groundwork for Android TV / Apple TV   | 🔲 Planned               |
+| **GPU transcoding** — NVENC / VAAPI / VideoToolbox                     | 🔲 Planned               |
+| **Native TLS** — terminate HTTPS inside VLMP (no reverse proxy needed) | 🔲 Planned               |
+| **`/api/info` device discovery** ✅                                    | Shipped in v0.1.9 branch |
 
 ### Shipped in v0.1.x
 
