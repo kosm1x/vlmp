@@ -441,3 +441,250 @@ body {
   display: inline;
   margin: 0;
 }
+
+/* ============================================================
+   LUMIERE DARK — COMPONENT RESKIN (Home, Cards, Player, Detail)
+   ============================================================ */
+
+/* ---- Auth / Login ---- */
+.auth-form {
+  background: var(--lum-bg-surface);
+  border: 1px solid var(--lum-border);
+  border-radius: 10px;
+}
+.auth-form h1 {
+  font-family: var(--lum-font-display);
+  font-weight: 400;
+  letter-spacing: 0.05em;
+  color: var(--lum-text-primary);
+}
+.auth-form input {
+  background: var(--lum-bg-raised);
+  border: 1px solid var(--lum-border);
+  border-radius: 6px;
+  color: var(--lum-text-primary);
+  font-family: var(--lum-font-ui);
+}
+.auth-form input:focus {
+  border-color: var(--lum-border-hover);
+  outline: none;
+}
+.auth-form button {
+  background: var(--lum-gold);
+  color: var(--lum-bg);
+  border-radius: 6px;
+  font-family: var(--lum-font-ui);
+  font-weight: 600;
+  letter-spacing: 0.04em;
+}
+.auth-form button:hover {
+  opacity: 0.88;
+}
+.auth-form .toggle {
+  color: var(--lum-text-secondary);
+}
+.auth-form .toggle a {
+  color: var(--lum-text-primary);
+}
+
+/* ---- Home / Browse ---- */
+.browse {
+  padding: 74px 2rem 3rem;
+}
+.media-row {
+  margin-bottom: 2.5rem;
+}
+.media-row h2 {
+  font-family: var(--lum-font-display);
+  font-weight: 400;
+  font-size: 1.05rem;
+  color: var(--lum-text-primary);
+  letter-spacing: 0.02em;
+  margin-bottom: 0.9rem;
+}
+.media-row-items::-webkit-scrollbar {
+  height: 3px;
+}
+.media-row-items::-webkit-scrollbar-thumb {
+  background: var(--lum-border-hover);
+  border-radius: 2px;
+}
+
+/* ---- Media Card ---- */
+.media-card-poster {
+  background: var(--lum-bg-surface);
+  border-radius: 6px;
+  border: 1px solid var(--lum-border);
+}
+.media-card-poster .no-poster {
+  color: var(--lum-text-dim);
+  font-family: var(--lum-font-ui);
+}
+.media-card-progress {
+  background: rgba(237, 232, 224, 0.12);
+}
+.media-card-progress-bar {
+  background: var(--lum-gold);
+}
+.media-card-play {
+  background: rgba(12, 11, 10, 0.75);
+  border-color: rgba(237, 232, 224, 0.6);
+  color: var(--lum-text-primary);
+  backdrop-filter: blur(4px);
+}
+.media-card-play:hover {
+  background: var(--lum-gold);
+  border-color: var(--lum-gold);
+  color: var(--lum-bg);
+}
+.media-card-title {
+  color: var(--lum-text-primary);
+  font-family: var(--lum-font-ui);
+  font-size: 0.8rem;
+  margin-top: 0.45rem;
+}
+.media-card-year {
+  color: var(--lum-text-secondary);
+}
+
+/* ---- Player ---- */
+.player-page {
+  background: #000;
+}
+.player-header {
+  background: linear-gradient(180deg, rgba(12, 11, 10, 0.85) 0%, transparent 100%);
+}
+.player-back {
+  color: var(--lum-text-primary);
+  opacity: 0.8;
+  transition: opacity 0.15s;
+}
+.player-back:hover {
+  opacity: 1;
+}
+.player-title {
+  font-family: var(--lum-font-display);
+  font-weight: 400;
+  color: var(--lum-text-primary);
+  letter-spacing: 0.02em;
+}
+.player-controls {
+  background: linear-gradient(0deg, rgba(12, 11, 10, 0.85) 0%, transparent 100%);
+}
+.player-seek {
+  background: rgba(237, 232, 224, 0.2);
+  border-radius: 2px;
+}
+.player-seek::-webkit-slider-thumb {
+  background: var(--lum-gold);
+}
+.player-btn {
+  color: var(--lum-text-primary);
+}
+.player-time {
+  color: var(--lum-text-secondary);
+  font-family: var(--lum-font-ui);
+}
+.player-select {
+  background: var(--lum-bg-raised);
+  border: 1px solid var(--lum-border);
+  color: var(--lum-text-primary);
+  font-family: var(--lum-font-ui);
+  border-radius: 6px;
+}
+
+/* ---- Media Detail ---- */
+.detail-backdrop::after {
+  background: linear-gradient(
+    0deg,
+    var(--lum-bg) 0%,
+    rgba(12, 11, 10, 0.55) 50%,
+    rgba(12, 11, 10, 0.25) 100%
+  );
+}
+.detail-no-poster {
+  background: var(--lum-bg-surface);
+  border: 1px solid var(--lum-border);
+  color: var(--lum-text-dim);
+  border-radius: 8px;
+}
+.detail-poster img {
+  border-radius: 8px;
+  box-shadow: 0 8px 40px rgba(0, 0, 0, 0.7);
+}
+.detail-title {
+  font-family: var(--lum-font-display);
+  font-weight: 400;
+  color: var(--lum-text-primary);
+  font-size: clamp(1.6rem, 4vw, 2.4rem);
+}
+.detail-meta {
+  color: var(--lum-text-secondary);
+  font-size: 0.875rem;
+}
+.detail-rating {
+  color: var(--lum-gold);
+}
+.detail-genre {
+  background: rgba(237, 232, 224, 0.06);
+  border: 1px solid var(--lum-border);
+  color: var(--lum-text-secondary);
+  border-radius: 20px;
+}
+.detail-description {
+  color: var(--lum-text-primary);
+  line-height: 1.65;
+  font-size: 0.92rem;
+}
+.detail-play-btn {
+  background: var(--lum-gold);
+  color: var(--lum-bg);
+  border-radius: 6px;
+  font-family: var(--lum-font-ui);
+  font-weight: 600;
+  letter-spacing: 0.03em;
+}
+.detail-play-btn:hover {
+  opacity: 0.88;
+}
+.detail-btn {
+  background: rgba(237, 232, 224, 0.07);
+  border: 1px solid var(--lum-border);
+  color: var(--lum-text-primary);
+  font-family: var(--lum-font-ui);
+  border-radius: 6px;
+}
+.detail-btn:hover {
+  background: rgba(237, 232, 224, 0.14);
+  border-color: var(--lum-border-hover);
+}
+.detail-btn.active {
+  background: rgba(196, 164, 74, 0.15);
+  border-color: var(--lum-gold);
+  color: var(--lum-gold);
+}
+.detail-playlist-picker {
+  background: var(--lum-bg-surface);
+  border: 1px solid var(--lum-border-hover);
+  border-radius: 8px;
+  box-shadow: 0 8px 30px rgba(0, 0, 0, 0.6);
+}
+.detail-picker-item:hover {
+  background: var(--lum-bg-raised);
+}
+.detail-picker-empty {
+  color: var(--lum-text-secondary);
+}
+.detail-subtitles h3 {
+  color: var(--lum-text-secondary);
+  font-family: var(--lum-font-ui);
+}
+.detail-subtitle-tag {
+  background: rgba(237, 232, 224, 0.06);
+  border: 1px solid var(--lum-border);
+  color: var(--lum-text-secondary);
+  border-radius: 4px;
+}
+.detail-error {
+  color: var(--lum-danger);
+}
