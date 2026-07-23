@@ -4,6 +4,7 @@
 
 **A featherweight, self-hosted media server.** One process, one SQLite file, a ~3KB web client with no build step, and HLS adaptive streaming. Runs on a Raspberry Pi, a $5 VPS, or an old laptop — and stays out of your way.
 
+[![CI](https://github.com/kosm1x/vlmp/actions/workflows/ci.yml/badge.svg)](https://github.com/kosm1x/vlmp/actions/workflows/ci.yml)
 [![License](https://img.shields.io/badge/license-Apache--2.0-blue.svg)](LICENSE)
 ![Node](https://img.shields.io/badge/node-%3E%3D22-brightgreen.svg)
 ![Tests](https://img.shields.io/badge/tests-378%20passing-brightgreen.svg)
