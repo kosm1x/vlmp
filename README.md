@@ -111,18 +111,20 @@ Native TLS inside VLMP is on the roadmap but not shipped; today, terminate TLS a
 ```bash
 # Proxy and VLMP both on the host:
 VLMP_TRUST_PROXY=loopback
-# Proxy on the host, VLMP in Docker (the compose setup): requests arrive from the
-# bridge gateway (e.g. 172.17.0.1), NOT 127.0.0.1 — so loopback would match nothing.
-VLMP_TRUST_PROXY=uniquelocal
-# Or name it exactly / count hops / trust any upstream:
+# Proxy on the host, VLMP in Docker: requests arrive from the bridge gateway
+# (e.g. 172.17.0.1), NOT 127.0.0.1 — so loopback would match nothing. Name the
+# gateway exactly; `docker network inspect bridge` prints it.
 VLMP_TRUST_PROXY=172.17.0.1
-VLMP_TRUST_PROXY=1
-VLMP_TRUST_PROXY=true
 ```
 
-Accepts `loopback`, `linklocal`, `uniquelocal`, an address or CIDR list, a hop count, or a boolean. A value it can't parse is **ignored with an error** — it will never fall back to trusting.
+Accepts `loopback`, `linklocal`, `uniquelocal`, an address or CIDR list, or a hop count. A value it can't parse is **ignored with an error** — it will never fall back to trusting.
 
-Leave it **unset** if VLMP is reachable directly. `X-Forwarded-For` is just a header a client can write, so trusting it on a directly-reachable server lets anyone forge a fresh identity per request and bypass rate limiting entirely — including the login brute-force caps. Only enable it when the proxy is the only route in, and prefer naming the proxy over a bare `true`.
+**Name the proxy as narrowly as you can, and make sure it really is the only route in.** Two ways to get this wrong:
+
+- **Too broad.** `uniquelocal` covers `10/8`, `172.16/12` and `192.168/16` — on a home network that is _every client_, not just your proxy. Likewise `VLMP_TRUST_PROXY=true` trusts any upstream whatsoever.
+- **Not actually behind the proxy.** The compose file publishes `8080` on all interfaces, so anything on your LAN can also reach VLMP directly, skipping the proxy. If a host proxy fronts it, bind the port to loopback so it can't: `ports: - "127.0.0.1:8080:8080"`.
+
+Either mistake hands rate limiting to the client. `X-Forwarded-For` is just a header a client can write, so a request that reaches VLMP from a trusted address can claim any identity it likes — forging a fresh one per request defeats the global limiter and the login brute-force caps alike. Leave it **unset** if VLMP is reachable directly; unset is strictly safer than wrong.
 
 ## Configuration
 

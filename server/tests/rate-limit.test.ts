@@ -105,7 +105,10 @@ describe("parseTrustProxy", () => {
     expect(parseTrustProxy("loopback")).toBe("loopback");
     expect(parseTrustProxy("127.0.0.1")).toBe("127.0.0.1");
     expect(parseTrustProxy("127.0.0.1,::1")).toBe("127.0.0.1,::1");
-    expect(parseTrustProxy("127.0.0.1, ::1")).toBe("127.0.0.1, ::1");
+    // Normalized, not passed through: whitespace and empty entries are stripped
+    // because Fastify would choke on them (see the property test below).
+    expect(parseTrustProxy("127.0.0.1, ::1")).toBe("127.0.0.1,::1");
+    expect(parseTrustProxy("127.0.0.1,")).toBe("127.0.0.1");
     expect(parseTrustProxy("10.0.0.0/8")).toBe("10.0.0.0/8");
     expect(parseTrustProxy("172.16.0.0/12")).toBe("172.16.0.0/12");
     expect(parseTrustProxy("fd00::/8")).toBe("fd00::/8");
@@ -201,5 +204,76 @@ describe("trustProxy restores per-client limits behind a proxy", () => {
       (await app.inject({ url: "/library/browse", headers: same })).statusCode,
     ).toBe(429);
     await app.close();
+  });
+});
+
+// The invariant that actually matters, asserted against the REAL downstream
+// parser: every value parseTrustProxy is willing to return must be one Fastify
+// can construct with. Asserting on the returned value instead (as the cases
+// above do) cannot catch a value that passes our validation and then throws
+// inside Fastify — which is the exit-0-no-listener failure this module exists to
+// prevent, so it gets a property test rather than examples.
+describe("parseTrustProxy never returns a value Fastify rejects", () => {
+  const inputs = [
+    undefined,
+    "",
+    "   ",
+    "false",
+    "FALSE",
+    "no",
+    "off",
+    "0",
+    "true",
+    "TRUE",
+    "yes",
+    "on",
+    "1",
+    "2",
+    "99",
+    "loopback",
+    "linklocal",
+    "uniquelocal",
+    "127.0.0.1",
+    "::1",
+    "127.0.0.1,::1",
+    "127.0.0.1, ::1",
+    "10.0.0.0/8",
+    "172.16.0.0/12",
+    "fd00::/8",
+    "10.0.0.0/32",
+    "::1/128",
+    // Shapes a human actually mistypes or reaches for:
+    "127.0.0.1,",
+    ",127.0.0.1",
+    "127.0.0.1,,::1",
+    "loopback,",
+    " , ",
+    "0.0.0.0/0",
+    "10.0.0.0/0",
+    "::/0",
+    "127.0.0.1/0",
+    "1.5",
+    "garbage",
+    "127.0.0.1 ::1",
+    "10.0.0.0/99",
+    "-1",
+    "10.0.0.0/255.0.0.0",
+  ];
+
+  it("holds for every input, valid or malformed", () => {
+    const spy = vi.spyOn(console, "error").mockImplementation(() => {});
+    const bad: string[] = [];
+    for (const raw of inputs) {
+      const parsed = parseTrustProxy(raw);
+      try {
+        Fastify({ trustProxy: parsed as never });
+      } catch (err) {
+        bad.push(
+          `${JSON.stringify(raw)} -> ${JSON.stringify(parsed)}: ${(err as Error).message}`,
+        );
+      }
+    }
+    spy.mockRestore();
+    expect(bad).toEqual([]);
   });
 });

@@ -65,7 +65,13 @@ function isTrustEntry(entry: string): boolean {
   if (!family) return false;
   if (slash === -1) return true;
   const prefix = entry.slice(slash + 1);
-  return /^\d+$/.test(prefix) && Number(prefix) <= (family === 4 ? 32 : 128);
+  if (!/^\d+$/.test(prefix)) return false;
+  const bits = Number(prefix);
+  // Bounded on BOTH sides: proxy-addr throws on `range <= 0`, so a /0 — the
+  // idiomatic "trust everything" spelling from nginx/AWS/UFW — would otherwise
+  // pass validation and then throw inside Fastify. `true` is the only way to
+  // express trust-all here.
+  return bits >= 1 && bits <= (family === 4 ? 32 : 128);
 }
 
 export function parseTrustProxy(
@@ -80,7 +86,12 @@ export function parseTrustProxy(
     .split(",")
     .map((s) => s.trim())
     .filter(Boolean);
-  if (entries.length > 0 && entries.every(isTrustEntry)) return value;
+  // Return the CLEANED list, not the raw string. Fastify re-splits whatever it
+  // is given without filtering empties, so passing `value` through would hand it
+  // an empty entry for a trailing/leading/doubled comma — a value we just
+  // validated as fine, which then throws at construction.
+  if (entries.length > 0 && entries.every(isTrustEntry))
+    return entries.join(",");
 
   console.error(
     `VLMP_TRUST_PROXY: "${value}" is not a valid proxy address list — ignoring it, the proxy is NOT trusted. ` +
