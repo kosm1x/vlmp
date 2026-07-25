@@ -7,7 +7,6 @@
 [![CI](https://github.com/kosm1x/vlmp/actions/workflows/ci.yml/badge.svg)](https://github.com/kosm1x/vlmp/actions/workflows/ci.yml)
 [![License](https://img.shields.io/badge/license-Apache--2.0-blue.svg)](LICENSE)
 ![Node](https://img.shields.io/badge/node-%3E%3D22-brightgreen.svg)
-![Tests](https://img.shields.io/badge/tests-378%20passing-brightgreen.svg)
 
 </div>
 
@@ -66,18 +65,21 @@ If that scope fits how you actually watch, welcome.
 ### Docker (recommended)
 
 ```bash
-# 1. Grab the compose file
-curl -fsSL https://raw.githubusercontent.com/kosm1x/vlmp/master/docker-compose.yml -o docker-compose.yml
+# 1. Get the repo (the compose file builds the image from source)
+git clone https://github.com/kosm1x/vlmp.git
+cd vlmp
 
 # 2. Set a real JWT secret and point it at your media
 export VLMP_JWT_SECRET="$(openssl rand -hex 32)"
 #    edit docker-compose.yml: mount your media folder at /media (read-only)
 
-# 3. Up
-docker compose up -d
+# 3. Up — builds the image on first run
+docker compose up -d --build
 
 # 4. Open http://localhost:8080 — the first account you register becomes admin
 ```
+
+**Updating:** once release images are published to GHCR, `docker compose pull && docker compose up -d` switches you to them. The explicit `pull` matters — a local build is tagged with that same `ghcr.io/kosm1x/vlmp:latest` name, so a plain `up -d` would keep reusing your own image instead.
 
 ### From source
 

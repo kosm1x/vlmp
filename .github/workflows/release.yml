@@ -1,0 +1,127 @@
+name: Release
+
+# Publishes a multi-arch container image to GHCR when a version tag is pushed.
+#
+# `:latest` is derived DELIBERATELY, not automatically. metadata-action's default
+# `latest=auto` is unsafe for this repo, for two separate reasons:
+#   * `type=ref,event=tag` reports latest=true for ANY tag with no pre-release
+#     check, and Meta.setVersion latches the first value it sees and never
+#     demotes it — so a `-rc` tag would silently take `:latest`.
+#   * `type=raw` has no ref guard at all, so a workflow_dispatch from a branch
+#     would publish that branch as `:latest` — and, since the tag-scoped rules
+#     all no-op off a tag, as the ONLY tag.
+# So: `flavor: latest=false` disables the automatic behaviour, and one guarded
+# raw rule applies `:latest` only to a non-pre-release tag.
+#
+# metadata-action also never compares against existing repo tags, so on its own it
+# would happily move `:latest` BACKWARD when a hotfix is cut from an older line.
+# The "Is this the newest release tag?" step below closes that: `:latest` is
+# applied only when the pushed tag is the highest non-pre-release tag in the repo.
+# That also makes re-running an old tag's workflow harmless.
+on:
+  push:
+    tags: ["v*"]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  packages: write
+
+# `:latest` is a single mutable pointer — never let two releases race to write it.
+# Deliberately NOT cancel-in-progress: a half-pushed manifest is worse than a queue.
+concurrency:
+  group: release-${{ github.repository }}
+  cancel-in-progress: false
+
+jobs:
+  image:
+    name: Build & push image
+    # Refuse to publish from anything that is not a version tag. workflow_dispatch
+    # stays available for re-running a release from a tag ref, but picking a
+    # BRANCH in the Actions UI must never overwrite the image users pull.
+    if: startsWith(github.ref, 'refs/tags/v')
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      # Actions are pinned to commit SHAs, not mutable major tags: this job holds
+      # `packages: write`, so a retagged upstream action could push an arbitrary
+      # image to every user. Dependabot (.github/dependabot.yml) keeps the SHAs
+      # current and surfaces major bumps as reviewable PRs.
+      # fetch-depth: 0 for the full tag list — the newest-tag check below needs it.
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          fetch-depth: 0
+
+      # Gate for `:latest`. Compare the pushed tag against every other release tag
+      # and only claim `:latest` if this one is the highest, so a hotfix cut from an
+      # older line (or a re-run of an old tag's workflow) can't drag `:latest`
+      # backward and silently downgrade everyone who pulls it.
+      #
+      # `sed '/-/d'` drops pre-releases before comparing (they never take `:latest`
+      # anyway) and avoids a `grep -v -- '-'` that some grep implementations reject.
+      # `sort -V` orders the current non-semver scheme correctly too: verified
+      # 0.1.9 < 0.1.9.1 < 0.1.9.4 < 0.1.10 < 0.2.0 < 0.10.0.
+      - name: Is this the newest release tag?
+        id: newest
+        run: |
+          set -euo pipefail
+          newest="v$(git tag -l 'v*' | sed '/-/d' | sed 's/^v//' | sort -V | tail -1)"
+          echo "newest release tag: $newest | this tag: $GITHUB_REF_NAME"
+          if [ "$newest" = "$GITHUB_REF_NAME" ]; then
+            echo "is_newest=true" >>"$GITHUB_OUTPUT"
+          else
+            echo "is_newest=false" >>"$GITHUB_OUTPUT"
+            echo "::notice::$GITHUB_REF_NAME is not the newest tag ($newest) — publishing version tags but NOT :latest"
+          fi
+
+      # arm64 emulation so the image also runs on a Raspberry Pi. Only arm64 is
+      # needed — the default 'all' registers ~10 unused binfmt handlers — and
+      # cache-image would push the binfmt image into a cache scope this
+      # tag-triggered workflow can never read back (see the build step below).
+      - name: Set up QEMU
+        uses: docker/setup-qemu-action@c7c53464625b32c7a7e944ae62b3e17d2b600130 # v3.7.0
+        with:
+          platforms: arm64
+          cache-image: false
+
+      - name: Set up Buildx
+        uses: docker/setup-buildx-action@8d2750c68a42422c14e847fe6c8ac0403b4cbd6f # v3.12.0
+
+      - name: Log in to GHCR
+        uses: docker/login-action@c94ce9fb468520275223c153574b00df6fe4bcc9 # v3.7.0
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Derive image tags
+        id: meta
+        uses: docker/metadata-action@c299e40c65443455700f0fdfc63efafe5b349051 # v5.10.0
+        with:
+          images: ghcr.io/${{ github.repository }}
+          flavor: latest=false
+          # Non-semver tags (the current v0.1.9.4 style) make the semver rules
+          # warn and skip; type=ref still yields the tag name, so a release is
+          # never left tag-less. `:latest` requires BOTH that this is not a
+          # pre-release and that it is the newest release tag.
+          tags: |
+            type=ref,event=tag
+            type=semver,pattern={{version}}
+            type=semver,pattern={{major}}.{{minor}}
+            type=raw,value=latest,enable=${{ steps.newest.outputs.is_newest == 'true' && !contains(github.ref_name, '-') }}
+
+      - name: Build and push
+        uses: docker/build-push-action@10e90e3645eae34f1e60eeb005ba3a3d33f178e8 # v6.19.2
+        with:
+          context: .
+          platforms: linux/amd64,linux/arm64
+          push: true
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+          # SLSA provenance, so users can verify which commit produced an image.
+          # Buildx generates and pushes this itself — no extra permissions needed.
+          provenance: true
+          # No GHA layer cache on purpose: that cache is ref-scoped and this
+          # workflow only ever runs on tags, so `cache-from` could never hit,
+          # while `cache-to,mode=max` would burn ~1GB of the repo's shared 10GB
+          # budget per release and evict the npm cache that gates PRs.
