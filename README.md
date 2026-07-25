@@ -106,6 +106,24 @@ VLMP binds to your LAN by default. To get "anywhere, anytime" **do not port-forw
 
 Native TLS inside VLMP is on the roadmap but not shipped; today, terminate TLS at the proxy.
 
+**If you use a reverse proxy, set `VLMP_TRUST_PROXY`.** Without it every request appears to come from the proxy's address, so all your users share one rate-limit bucket — a busy household can 429 itself, and the per-route login limits stop distinguishing between clients. With it, `X-Forwarded-For` is used and limits apply per real client:
+
+```bash
+# Proxy and VLMP both on the host:
+VLMP_TRUST_PROXY=loopback
+# Proxy on the host, VLMP in Docker (the compose setup): requests arrive from the
+# bridge gateway (e.g. 172.17.0.1), NOT 127.0.0.1 — so loopback would match nothing.
+VLMP_TRUST_PROXY=uniquelocal
+# Or name it exactly / count hops / trust any upstream:
+VLMP_TRUST_PROXY=172.17.0.1
+VLMP_TRUST_PROXY=1
+VLMP_TRUST_PROXY=true
+```
+
+Accepts `loopback`, `linklocal`, `uniquelocal`, an address or CIDR list, a hop count, or a boolean. A value it can't parse is **ignored with an error** — it will never fall back to trusting.
+
+Leave it **unset** if VLMP is reachable directly. `X-Forwarded-For` is just a header a client can write, so trusting it on a directly-reachable server lets anyone forge a fresh identity per request and bypass rate limiting entirely — including the login brute-force caps. Only enable it when the proxy is the only route in, and prefer naming the proxy over a bare `true`.
+
 ## Configuration
 
 All configuration is via environment variables. The important ones:
@@ -119,6 +137,7 @@ All configuration is via environment variables. The important ones:
 | `VLMP_OPENSUBTITLES_API_KEY` | _(empty)_                   | opensubtitles.com key for subtitle search/download    |
 | `VLMP_SERVER_NAME`           | `VLMP`                      | Display name in federation                            |
 | `VLMP_PUBLIC_URL`            | _(empty)_                   | Public URL for federation linking                     |
+| `VLMP_TRUST_PROXY`           | _(off)_                     | Trust `X-Forwarded-For` — set only behind a proxy     |
 
 The full list (transcode limits, free-disk floor, sample-duration floor, scheduled backups, x264 preset, empty-trash-on-scan) is documented in [`.env.example`](.env.example).
 
