@@ -15,6 +15,11 @@ jobs:
   test:
     name: Typecheck & test (Node 22)
     runs-on: ubuntu-latest
+    # The suite runs in ~1 min. This is a hang guard, not a budget: the tests
+    # spawn real ffmpeg/ffprobe, so a wedged child process can leave the job
+    # running to the 6h default while reporting "pending" — observed once on
+    # 2026-07-25. Fail in 15 so it's obvious and the runner is released.
+    timeout-minutes: 15
     steps:
       # Actions are pinned to commit SHAs so a retagged upstream can't change what
       # runs here. Dependabot (.github/dependabot.yml) keeps them current.
