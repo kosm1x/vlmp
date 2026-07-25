@@ -81,6 +81,20 @@ docker compose up -d --build
 
 **Updating:** once release images are published to GHCR, `docker compose pull && docker compose up -d` switches you to them. The explicit `pull` matters — a local build is tagged with that same `ghcr.io/kosm1x/vlmp:latest` name, so a plain `up -d` would keep reusing your own image instead.
 
+**Pinning a version.** VLMP uses a 4-part `MAJOR.MINOR.PATCH.BUILD` scheme ([why](CONTRIBUTING.md#versioning)). Each release publishes its own exact tags and advances the shorter ones, so you choose how much drift you accept. **How many dot-parts a tag has tells you whether it moves:**
+
+| Tag          | Example    | Moves?                                   |
+| ------------ | ---------- | ---------------------------------------- |
+| `v<version>` | `v0.1.9.4` | Never — the git tag verbatim             |
+| Four parts   | `0.1.9.4`  | Never — a pointer is never four parts    |
+| Three parts  | `0.1.9`    | To the newest build on that patch line   |
+| Two parts    | `0.1`      | To the newest release on that minor line |
+| `latest`     | —          | To the newest release overall            |
+
+For a fully immutable pin use `v0.1.9.4` or the four-part `0.1.9.4`. Note the overlap: a release tagged with only three parts (`v0.2.0`) publishes `0.2.0`, and that same name later becomes the patch-line pointer when `v0.2.0.1` ships — so prefer the `v`-prefixed tag if you want a name that can never be reused.
+
+Pointers only ever move forward, and pre-releases (`-rc.N`) never take one.
+
 **Verifying a release image.** Once release images are published to GHCR they will carry a SLSA provenance attestation and an SBOM, so you won't have to take the tag's word for what you're running:
 
 ```bash
@@ -166,7 +180,7 @@ GET /api/info
 ```json
 {
   "name": "My VLMP",
-  "version": "0.1.9-4",
+  "version": "0.1.9.4",
   "publicUrl": "https://vlmp.example.com",
   "fingerprint": "vlmp-a3f2b1",
   "capabilities": ["hls", "subtitles", "playlists", "federation"]
