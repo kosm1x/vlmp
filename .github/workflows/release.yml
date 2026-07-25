@@ -79,7 +79,7 @@ jobs:
       # cache-image would push the binfmt image into a cache scope this
       # tag-triggered workflow can never read back (see the build step below).
       - name: Set up QEMU
-        uses: docker/setup-qemu-action@c7c53464625b32c7a7e944ae62b3e17d2b600130 # v3.7.0
+        uses: docker/setup-qemu-action@96fe6ef7f33517b61c61be40b68a1882f3264fb8 # v4.2.0
         with:
           platforms: arm64
           cache-image: false
