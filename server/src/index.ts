@@ -2,7 +2,7 @@ import Fastify from "fastify";
 import cors from "@fastify/cors";
 import rateLimit from "@fastify/rate-limit";
 import fastifyStatic from "@fastify/static";
-import { isDataPlanePath } from "./rate-limit.js";
+import { isDataPlanePath, parseTrustProxy } from "./rate-limit.js";
 import { resolve } from "node:path";
 import { existsSync, mkdirSync, rmSync } from "node:fs";
 import { execFile } from "node:child_process";
@@ -100,6 +100,9 @@ const app = Fastify({
     },
   },
   bodyLimit: 1_048_576,
+  // Off unless VLMP_TRUST_PROXY is set — see parseTrustProxy. Safe to read
+  // process.env here: loadConfig() above has already applied vlmp.env to it.
+  trustProxy: parseTrustProxy(process.env.VLMP_TRUST_PROXY),
 });
 
 if (config.jwtSecret === "vlmp-dev-secret-change-me") {

@@ -118,6 +118,26 @@ VLMP binds to your LAN by default. To get "anywhere, anytime" **do not port-forw
 
 Native TLS inside VLMP is on the roadmap but not shipped; today, terminate TLS at the proxy.
 
+**If you use a reverse proxy, set `VLMP_TRUST_PROXY`.** Without it every request appears to come from the proxy's address, so all your users share one rate-limit bucket — a busy household can 429 itself, and the per-route login limits stop distinguishing between clients. With it, `X-Forwarded-For` is used and limits apply per real client:
+
+```bash
+# Proxy and VLMP both on the host:
+VLMP_TRUST_PROXY=loopback
+# Proxy on the host, VLMP in Docker: requests arrive from the bridge gateway
+# (e.g. 172.17.0.1), NOT 127.0.0.1 — so loopback would match nothing. Name the
+# gateway exactly; `docker network inspect bridge` prints it.
+VLMP_TRUST_PROXY=172.17.0.1
+```
+
+Accepts `loopback`, `linklocal`, `uniquelocal`, an address or CIDR list, or a hop count. A value it can't parse is **ignored with an error** — it will never fall back to trusting.
+
+**Name the proxy as narrowly as you can, and make sure it really is the only route in.** Two ways to get this wrong:
+
+- **Too broad.** `uniquelocal` covers `10/8`, `172.16/12` and `192.168/16` — on a home network that is _every client_, not just your proxy. Likewise `VLMP_TRUST_PROXY=true` trusts any upstream whatsoever.
+- **Not actually behind the proxy.** The compose file publishes `8080` on all interfaces, so anything on your LAN can also reach VLMP directly, skipping the proxy. If a host proxy fronts it, bind the port to loopback so it can't: `ports: - "127.0.0.1:8080:8080"`.
+
+Either mistake hands rate limiting to the client. `X-Forwarded-For` is just a header a client can write, so a request that reaches VLMP from a trusted address can claim any identity it likes — forging a fresh one per request defeats the global limiter and the login brute-force caps alike. Leave it **unset** if VLMP is reachable directly; unset is strictly safer than wrong.
+
 ## Configuration
 
 All configuration is via environment variables. The important ones:
@@ -131,6 +151,7 @@ All configuration is via environment variables. The important ones:
 | `VLMP_OPENSUBTITLES_API_KEY` | _(empty)_                   | opensubtitles.com key for subtitle search/download    |
 | `VLMP_SERVER_NAME`           | `VLMP`                      | Display name in federation                            |
 | `VLMP_PUBLIC_URL`            | _(empty)_                   | Public URL for federation linking                     |
+| `VLMP_TRUST_PROXY`           | _(off)_                     | Trust `X-Forwarded-For` — set only behind a proxy     |
 
 The full list (transcode limits, free-disk floor, sample-duration floor, scheduled backups, x264 preset, empty-trash-on-scan) is documented in [`.env.example`](.env.example).
 
