@@ -35,18 +35,18 @@ services:
       # Example of multiple roots:
       # - /mnt/movies:/media/movies:ro
       # - /mnt/tv:/media/tv:ro
-    healthcheck:
-      test:
-        [
-          "CMD",
-          "node",
-          "-e",
-          "fetch('http://127.0.0.1:8080/api/info').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))",
-        ]
-      interval: 30s
-      timeout: 5s
-      retries: 3
-      start_period: 20s
+    # No `healthcheck:` here on purpose. A Compose healthcheck OVERRIDES the
+    # image's, and the probe baked into the Dockerfile is strictly better: it
+    # honours VLMP_PORT instead of hardcoding 8080, so it keeps working if you
+    # change the port. Inherit it rather than duplicating it here.
+    #
+    # Cap the log so a long-running instance can't fill an SD card — Fastify logs
+    # every request, and the healthcheck alone is ~2,880 requests/day.
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
 
 # When you register library folders in the VLMP admin UI, use the CONTAINER
 # paths (e.g. /media/movies), not the host paths.

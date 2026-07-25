@@ -16,7 +16,15 @@ updates:
     schedule:
       interval: weekly
 
+  # Grouped into ONE pull request on purpose. The Dockerfile builds from
+  # node:22-bookworm and runs on node:22-bookworm-slim, and the compiled
+  # better-sqlite3/bcrypt bindings are only ABI-compatible while those two stay
+  # on the same base. Separate PRs could advance one stage and not the other,
+  # merge green (CI never builds the image), and crash-loop at container start.
   - package-ecosystem: docker
     directory: "/"
     schedule:
       interval: weekly
+    groups:
+      docker-base-images:
+        patterns: ["*"]

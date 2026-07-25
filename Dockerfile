@@ -57,9 +57,12 @@ USER node
 VOLUME ["/data"]
 EXPOSE 8080
 
-# Liveness probe against the unauthenticated /api/info endpoint
+# Liveness probe against the unauthenticated /api/info endpoint. Deliberately
+# lenient (<500, not r.ok): this asks "is the process serving?", so a 429 from
+# the global rate limiter — which /api/info is subject to — must NOT mark a
+# perfectly live container unhealthy. Only a 5xx or a dead socket counts.
 HEALTHCHECK --interval=30s --timeout=5s --start-period=20s --retries=3 \
-    CMD node -e "fetch('http://127.0.0.1:'+(process.env.VLMP_PORT||8080)+'/api/info').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"
+    CMD node -e "fetch('http://127.0.0.1:'+(process.env.VLMP_PORT||8080)+'/api/info').then(r=>process.exit(r.status<500?0:1)).catch(()=>process.exit(1))"
 
 # tsc (rootDir ".") mirrors the source tree, so the entrypoint lives at
 # dist/server/src/index.js — matches package.json "start".
