@@ -98,7 +98,9 @@ Things worth knowing before you bump it:
   non-semver version (verified on npm 10 — `npm ci` is unaffected), but
   `npm version` refuses to compute the next one. Edit `package.json` and the two
   `version` fields in `package-lock.json` together, or the next install rewrites
-  the lock and dirties the tree.
+  the lock and dirties the tree. The release workflow **refuses to publish** if
+  the tag, `package.json` and the lock disagree, so a forgotten bump fails the
+  release instead of shipping an image that misreports its own version.
 - **Publishing to npm is not an option** under this scheme, and isn't wanted —
   VLMP ships as a container image and a Windows installer, not a package.
 - Only VLMP's _own_ version is non-semver; dependency ranges are ordinary semver.
