@@ -7,14 +7,25 @@ FROM node:22-bookworm AS builder
 
 WORKDIR /app
 
-# Native module build deps (better-sqlite3, bcrypt)
-RUN apt-get update && apt-get install -y --no-install-recommends \
-        python3 make g++ \
-    && rm -rf /var/lib/apt/lists/*
+# No toolchain install here on purpose: node:22-bookworm already ships gcc, g++,
+# make and python3 (verified: `apt-get install -s python3 make g++` reports "0
+# newly installed"), so the apt round-trip that used to sit here cost ~2s and
+# ~19MB of package indexes per architecture to install nothing. The toolchain is
+# still present for the fallback path described below.
 
-# Install with dev deps so we can compile TypeScript
+# Install with dev deps so we can compile TypeScript.
+#
+# Neither native module normally compiles here, but for different reasons:
+#   * better-sqlite3 DOWNLOADS a prebuild matching node 22's ABI (127), via an
+#     install script of `prebuild-install || node-gyp rebuild` — a silent
+#     fallback: if the download ever 404s it compiles instead, adding minutes
+#     (far more under arm64 emulation) with no failure to explain the delay.
+#   * bcrypt SHIPS N-API prebuilds inside its npm tarball (prebuildify --napi,
+#     install script `node-gyp-build`), so it is not ABI-tagged and never
+#     downloads. A Node major bump does not need a new bcrypt release.
+# --foreground-scripts surfaces a fallback compile in the build log.
 COPY package.json package-lock.json ./
-RUN npm ci
+RUN npm ci --foreground-scripts
 
 # Build the server (tsc -> dist/) and keep the client assets
 COPY . .
@@ -22,6 +33,20 @@ RUN npm run build
 
 # Prune to production dependencies (native bindings stay compiled)
 RUN npm prune --omit=dev
+
+# Drop build inputs the runtime never reads. better-sqlite3 ships the sqlite
+# amalgamation in deps/ plus its C++ sources; bcrypt ships its sources too. At
+# runtime only the compiled .node under build/Release is loaded (via `bindings`).
+# Measured inside the image: node_modules 36MB -> 26MB, better-sqlite3 12MB ->
+# 2.1MB, per architecture.
+#
+# Left alone deliberately: bcrypt/prebuilds/ carries every platform's binding
+# (~1MB where ~76KB on arm64 / ~85KB on amd64 is used), but pruning it to just
+# this arch needs TARGETARCH plumbing for ~940KB — not worth the moving part.
+RUN rm -rf \
+        node_modules/better-sqlite3/deps \
+        node_modules/better-sqlite3/src \
+        node_modules/bcrypt/src
 
 
 # ── Stage 2: runtime ────────────────────────────────────────────────

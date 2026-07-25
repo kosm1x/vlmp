@@ -118,9 +118,18 @@ jobs:
           push: true
           tags: ${{ steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}
-          # SLSA provenance, so users can verify which commit produced an image.
-          # Buildx generates and pushes this itself — no extra permissions needed.
+          # SLSA provenance + SBOM, so users can verify which commit produced an
+          # image and what is inside it. Both ride in the same OCI index and are
+          # pushed with the credentials already in use — no extra permissions.
           provenance: true
+          # NOT `sbom: true`. That shorthand lets BuildKit resolve its default
+          # scanner image by mutable tag, which would smuggle an unpinned upstream
+          # into the one job holding `packages: write` — the exact thing the
+          # SHA-pinning policy above exists to prevent, and one Dependabot does not
+          # track. Pin the generator by digest instead. Refresh it manually when
+          # bumping syft; a stale scanner only means an older SBOM format.
+          attests: |
+            type=sbom,generator=docker/buildkit-syft-scanner:stable-1@sha256:79e7b013cbec16bbb436f312819a49a4a57752b2270c1a9332ae1a10fcc82a68
           # No GHA layer cache on purpose: that cache is ref-scoped and this
           # workflow only ever runs on tags, so `cache-from` could never hit,
           # while `cache-to,mode=max` would burn ~1GB of the repo's shared 10GB
