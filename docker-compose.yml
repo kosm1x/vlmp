@@ -4,6 +4,12 @@ services:
     #   image: ghcr.io/kosm1x/vlmp:latest
     # Or build locally from the repo:
     build: .
+    # `:latest` only exists AFTER a version tag is pushed and the Release
+    # workflow (.github/workflows/release.yml) publishes to GHCR. From a full
+    # checkout this is safe — with `build: .` present, Compose falls back to
+    # building the image locally when the pull finds nothing. A standalone
+    # compose file (no build context) would hard-fail here until the first
+    # image is published.
     image: ghcr.io/kosm1x/vlmp:latest
     container_name: vlmp
     restart: unless-stopped
@@ -30,7 +36,13 @@ services:
       # - /mnt/movies:/media/movies:ro
       # - /mnt/tv:/media/tv:ro
     healthcheck:
-      test: ["CMD", "node", "-e", "fetch('http://127.0.0.1:8080/').then(r=>process.exit(0)).catch(()=>process.exit(1))"]
+      test:
+        [
+          "CMD",
+          "node",
+          "-e",
+          "fetch('http://127.0.0.1:8080/api/info').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))",
+        ]
       interval: 30s
       timeout: 5s
       retries: 3

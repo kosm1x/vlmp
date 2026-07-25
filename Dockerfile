@@ -57,9 +57,9 @@ USER node
 VOLUME ["/data"]
 EXPOSE 8080
 
-# Simple liveness probe against the HTTP port
+# Liveness probe against the unauthenticated /api/info endpoint
 HEALTHCHECK --interval=30s --timeout=5s --start-period=20s --retries=3 \
-    CMD node -e "fetch('http://127.0.0.1:'+(process.env.VLMP_PORT||8080)+'/').then(r=>process.exit(r.ok||r.status<500?0:1)).catch(()=>process.exit(1))"
+    CMD node -e "fetch('http://127.0.0.1:'+(process.env.VLMP_PORT||8080)+'/api/info').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"
 
 # tsc (rootDir ".") mirrors the source tree, so the entrypoint lives at
 # dist/server/src/index.js — matches package.json "start".
