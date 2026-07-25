@@ -15,12 +15,41 @@ describe("readAppVersion", () => {
     expect(readAppVersion()).toBe(pkgVersion);
   });
 
+  // MAJOR.MINOR.PATCH[.BUILD] with an optional pre-release suffix, deliberately
+  // not semver — see CONTRIBUTING.md § Versioning. The suffix must start with a
+  // LETTER: that is what separates a real pre-release ("0.2.0.0-rc.1") from npm's
+  // prerelease encoding of a build number ("0.1.9-4"), which is exactly the form
+  // this scheme replaced. An earlier `-[0-9A-Za-z.]+` suffix accepted "0.1.9-4"
+  // and so pinned nothing.
+  const SCHEME = /^\d+\.\d+\.\d+(\.\d+)?(-[A-Za-z][0-9A-Za-z.]*)?$/;
+
   it("keeps package.json on the 4-part scheme", () => {
-    // MAJOR.MINOR.PATCH[.BUILD] with an optional pre-release suffix, deliberately
-    // not semver — see CONTRIBUTING.md § Versioning. This is the assertion that
-    // pins the decision: drift back to npm's "0.1.9-4" prerelease encoding fails
-    // here, while the tags, installer filename and image tags stayed 4-part.
-    expect(pkgVersion).toMatch(/^\d+\.\d+\.\d+(\.\d+)?(-[0-9A-Za-z.]+)?$/);
+    expect(pkgVersion).toMatch(SCHEME);
+  });
+
+  it("accepts the documented forms and rejects the encodings it replaced", () => {
+    // The reject list is the point of this test: without it the pattern above
+    // can pass while permitting the drift its comment claims to catch.
+    for (const v of [
+      "0.1.9.4",
+      "0.2.0",
+      "0.2.0.0-rc.1",
+      "1.0.0.0",
+      "0.10.0.1",
+    ]) {
+      expect(v, `${v} must be a valid version`).toMatch(SCHEME);
+    }
+    for (const v of [
+      "0.1.9-4",
+      "0.1.9-5",
+      "0.1.9-0",
+      "0.1",
+      "0.1.9.4.5",
+      "v0.1.9.4",
+      "0.1.9.4-",
+    ]) {
+      expect(v, `${v} must NOT be a valid version`).not.toMatch(SCHEME);
+    }
   });
 
   describe("with a fixture package.json", () => {

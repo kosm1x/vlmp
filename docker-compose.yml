@@ -26,6 +26,17 @@ services:
       # Transcode tuning (see .env.example)
       VLMP_MAX_TRANSCODE_SESSIONS: "${VLMP_MAX_TRANSCODE_SESSIONS:-4}"
       VLMP_TRANSCODE_PRESET: "${VLMP_TRANSCODE_PRESET:-veryfast}"
+      VLMP_OPENSUBTITLES_API_KEY: "${VLMP_OPENSUBTITLES_API_KEY:-}"
+      VLMP_RATE_LIMIT_MAX: "${VLMP_RATE_LIMIT_MAX:-600}"
+      VLMP_MIN_DURATION_SECONDS: "${VLMP_MIN_DURATION_SECONDS:-120}"
+      # Behind a reverse proxy, so rate limits key on the real client instead of
+      # the proxy. Compose only forwards keys named here, so without this line the
+      # README's proxy guidance is unreachable on the Docker path. See the config
+      # table in README.md for the accepted values.
+      VLMP_TRUST_PROXY: "${VLMP_TRUST_PROXY:-}"
+      # VLMP_DATA_DIR is deliberately NOT forwarded: the volume below mounts the
+      # data directory at /data, and pointing the app elsewhere would silently
+      # write into the container's ephemeral layer. Change the volume instead.
     volumes:
       # Persistent state: SQLite db, transcode cache, backups
       - ./data:/data

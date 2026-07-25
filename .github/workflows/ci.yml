@@ -6,6 +6,12 @@ on:
   pull_request:
     branches: [master]
 
+# Nothing here writes anything: no publish, no comment, no commit. Declared
+# explicitly so the jobs stop inheriting whatever the repository default happens
+# to be — these jobs run `npm ci`, which executes dependency lifecycle scripts.
+permissions:
+  contents: read
+
 # Cancel superseded runs on the same ref (e.g. a rapid second push).
 concurrency:
   group: ci-${{ github.ref }}

@@ -23,9 +23,12 @@ on:
     tags: ["v*"]
   workflow_dispatch:
 
+# Scoped per JOB, not here. A workflow-level `packages: write` would also be
+# handed to the test job, which runs `npm ci` and therefore executes dependency
+# lifecycle scripts — giving a compromised transitive postinstall the token that
+# pushes to GHCR. Only the job that publishes gets that scope.
 permissions:
   contents: read
-  packages: write
 
 # `:latest` is a single mutable pointer — never let two releases race to write it.
 # Deliberately NOT cancel-in-progress: a half-pushed manifest is worse than a queue.
@@ -43,6 +46,8 @@ jobs:
     if: startsWith(github.ref, 'refs/tags/v')
     runs-on: ubuntu-latest
     timeout-minutes: 15
+    permissions:
+      contents: read
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
       - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
@@ -64,6 +69,10 @@ jobs:
     if: startsWith(github.ref, 'refs/tags/v')
     runs-on: ubuntu-latest
     timeout-minutes: 45
+    # The only job that may write to the registry.
+    permissions:
+      contents: read
+      packages: write
     steps:
       # Actions are pinned to commit SHAs, not mutable major tags: this job holds
       # `packages: write`, so a retagged upstream action could push an arbitrary
@@ -130,6 +139,25 @@ jobs:
           echo "series=$series" >>"$GITHUB_OUTPUT"
           echo "minor=$minor" >>"$GITHUB_OUTPUT"
           echo "exact: $v | patch line: ${series:-(none)} | minor line: ${minor:-(none)}"
+
+          # The tag drives the image tags, but package.json drives /api/info, the
+          # Settings screen and the installer filename. Nothing else reconciles
+          # them, so tagging without bumping would publish an image that
+          # misreports its own version to every client — green tests, no warning.
+          # CONTRIBUTING.md promises one string everywhere; this enforces it.
+          pkg=$(node -p 'require("./package.json").version')
+          if [ "$pkg" != "$v" ]; then
+            echo "::error::tag $GITHUB_REF_NAME implies version $v but package.json says $pkg — bump package.json (and package-lock.json) or retag"
+            exit 1
+          fi
+          # Same reconciliation for the lock's two version fields: npm ci does not
+          # verify them, so drift here is invisible until it dirties someone's PR.
+          lock=$(node -p 'const l=require("./package-lock.json"); [l.version, l.packages[""].version].join(" ")')
+          if [ "$lock" != "$pkg $pkg" ]; then
+            echo "::error::package-lock.json version fields are \"$lock\", expected \"$pkg $pkg\""
+            exit 1
+          fi
+          echo "version reconciled: tag=$GITHUB_REF_NAME package.json=$pkg lock=ok"
 
       # arm64 emulation so the image also runs on a Raspberry Pi. Only arm64 is
       # needed — the default 'all' registers ~10 unused binfmt handlers — and
