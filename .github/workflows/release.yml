@@ -34,8 +34,30 @@ concurrency:
   cancel-in-progress: false
 
 jobs:
+  # ci.yml triggers on branches and PRs only, so a TAG push runs no tests at all.
+  # Without this gate a tag cut from a red commit publishes straight to everyone's
+  # `docker compose pull`. Mirrors ci.yml's test job rather than sharing it, to
+  # keep the release path self-contained and readable.
+  test:
+    name: Typecheck & test
+    if: startsWith(github.ref, 'refs/tags/v')
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+        with:
+          node-version: 22
+          cache: npm
+      - name: Install FFmpeg
+        run: sudo apt-get update -qq && sudo apt-get install -y --no-install-recommends ffmpeg
+      - run: npm ci
+      - run: npm run typecheck
+      - run: npm test
+
   image:
     name: Build & push image
+    needs: test
     # Refuse to publish from anything that is not a version tag. workflow_dispatch
     # stays available for re-running a release from a tag ref, but picking a
     # BRANCH in the Actions UI must never overwrite the image users pull.
@@ -65,13 +87,24 @@ jobs:
         id: newest
         run: |
           set -euo pipefail
-          newest="v$(git tag -l 'v*' | sed '/-/d' | sed 's/^v//' | sort -V | tail -1)"
+          # Only version-shaped tags take part. `sort -V` orders letters AFTER
+          # digits, so a single stray tag like `vnext` or `vlatest` would become
+          # the permanent "newest" and silently withhold :latest from every future
+          # release. The grep makes that impossible instead of unlikely.
+          tags=$(git tag -l 'v*' | { grep -E '^v[0-9]+(\.[0-9]+)*$' || true; })
+          if [ -z "$tags" ]; then
+            echo "::error::no version-shaped tags found — cannot decide :latest"
+            exit 1
+          fi
+          newest="v$(printf '%s\n' "$tags" | sed 's/^v//' | sort -V | tail -1)"
           echo "newest release tag: $newest | this tag: $GITHUB_REF_NAME"
           if [ "$newest" = "$GITHUB_REF_NAME" ]; then
             echo "is_newest=true" >>"$GITHUB_OUTPUT"
           else
             echo "is_newest=false" >>"$GITHUB_OUTPUT"
-            echo "::notice::$GITHUB_REF_NAME is not the newest tag ($newest) — publishing version tags but NOT :latest"
+            # WARNING, not notice: withholding :latest means `docker compose pull`
+            # gets nothing new, and that must not be a silent outcome.
+            echo "::warning::$GITHUB_REF_NAME is not the newest tag ($newest) — publishing version tags but NOT :latest"
           fi
 
       # arm64 emulation so the image also runs on a Raspberry Pi. Only arm64 is

@@ -73,7 +73,10 @@ jobs:
           load: true
           tags: vlmp:ci
           cache-from: type=gha
-          cache-to: ${{ github.event_name == 'push' && 'type=gha,mode=max' || '' }}
+          # Gate on the BRANCH, not the event. A PR run can only read the default
+          # branch's scope, so exporting from a feat/** push writes a cache no
+          # other run can ever read — ~1min of pure waste per push.
+          cache-to: ${{ github.ref == 'refs/heads/master' && 'type=gha,mode=max' || '' }}
           # The docker exporter that `load: true` uses cannot carry attestations.
           provenance: false
 
@@ -86,11 +89,18 @@ jobs:
 
           # Wait on the image's OWN HEALTHCHECK rather than reimplementing it, so a
           # broken probe definition fails this job instead of hiding behind a
-          # bespoke curl loop. First check lands ~interval (30s) after start.
+          # bespoke curl loop. Docker >=25 probes every --start-interval (default
+          # 5s) while still inside --start-period, so healthy normally lands in
+          # ~5s, not the 30s --interval. The 120s budget below is sized for the
+          # unhealthy verdict instead: start-period + retries x interval ~= 110s.
           status=starting
           for _ in $(seq 1 60); do
             status=$(docker inspect -f '{{.State.Health.Status}}' vlmp-ci)
             [ "$status" = healthy ] && break
+            if [ "$status" = unhealthy ]; then
+              echo "::error::container reported unhealthy"
+              exit 1
+            fi
             if [ "$(docker inspect -f '{{.State.Running}}' vlmp-ci)" != true ]; then
               echo "::error::container exited before becoming healthy"
               exit 1
@@ -106,7 +116,9 @@ jobs:
           # /api/info is unauthenticated and is what TV clients and device discovery
           # hit first. Assert the derived public id shape, so a regression that
           # leaks the raw federation fingerprint fails CI.
-          body=$(curl -fsS http://127.0.0.1:8080/api/info)
+          # --max-time so a socket that accepts but never answers fails in 10s
+          # rather than blocking until the job timeout.
+          body=$(curl -fsS --max-time 10 http://127.0.0.1:8080/api/info)
           echo "$body"
           jq -e '.fingerprint | test("^vlmp-[0-9a-f]{6}$")' >/dev/null <<<"$body" \
             || { echo "::error::fingerprint is not a derived public id"; exit 1; }
