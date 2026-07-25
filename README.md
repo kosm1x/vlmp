@@ -81,6 +81,18 @@ docker compose up -d --build
 
 **Updating:** once release images are published to GHCR, `docker compose pull && docker compose up -d` switches you to them. The explicit `pull` matters — a local build is tagged with that same `ghcr.io/kosm1x/vlmp:latest` name, so a plain `up -d` would keep reusing your own image instead.
 
+**Verifying a release image.** Once release images are published to GHCR they will carry a SLSA provenance attestation and an SBOM, so you won't have to take the tag's word for what you're running:
+
+```bash
+# Which commit and workflow built it, and what's inside
+docker buildx imagetools inspect ghcr.io/kosm1x/vlmp:latest --format '{{ json .Provenance }}'
+docker buildx imagetools inspect ghcr.io/kosm1x/vlmp:latest --format '{{ json .SBOM }}'
+```
+
+Images are multi-arch, so both fields come back keyed by platform. For one architecture: `--format '{{ json (index .SBOM "linux/amd64").SPDX }}'`.
+
+The provenance names the source repository, commit SHA and the workflow run that produced the image. Only tags built by [`release.yml`](.github/workflows/release.yml) carry it, and `:latest` is only ever moved to the newest non-pre-release tag.
+
 ### From source
 
 ```bash
