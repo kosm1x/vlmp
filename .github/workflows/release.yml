@@ -13,13 +13,11 @@ name: Release
 # So: `flavor: latest=false` disables the automatic behaviour, and one guarded
 # raw rule applies `:latest` only to a non-pre-release tag.
 #
-# KNOWN GAP: a hotfix tag cut from an older line still moves `:latest` backward,
-# because metadata-action never compares against existing repo tags. Closing that
-# needs a highest-tag comparison, which is unreliable while the tag scheme is not
-# valid semver (see README/versioning decision). Until then, re-point manually
-# after any out-of-order release:
-#   docker buildx imagetools create -t ghcr.io/kosm1x/vlmp:latest \
-#     ghcr.io/kosm1x/vlmp:<newest-version>
+# metadata-action also never compares against existing repo tags, so on its own it
+# would happily move `:latest` BACKWARD when a hotfix is cut from an older line.
+# The "Is this the newest release tag?" step below closes that: `:latest` is
+# applied only when the pushed tag is the highest non-pre-release tag in the repo.
+# That also makes re-running an old tag's workflow harmless.
 on:
   push:
     tags: ["v*"]
@@ -49,7 +47,32 @@ jobs:
       # `packages: write`, so a retagged upstream action could push an arbitrary
       # image to every user. Dependabot (.github/dependabot.yml) keeps the SHAs
       # current and surfaces major bumps as reviewable PRs.
+      # fetch-depth: 0 for the full tag list — the newest-tag check below needs it.
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          fetch-depth: 0
+
+      # Gate for `:latest`. Compare the pushed tag against every other release tag
+      # and only claim `:latest` if this one is the highest, so a hotfix cut from an
+      # older line (or a re-run of an old tag's workflow) can't drag `:latest`
+      # backward and silently downgrade everyone who pulls it.
+      #
+      # `sed '/-/d'` drops pre-releases before comparing (they never take `:latest`
+      # anyway) and avoids a `grep -v -- '-'` that some grep implementations reject.
+      # `sort -V` orders the current non-semver scheme correctly too: verified
+      # 0.1.9 < 0.1.9.1 < 0.1.9.4 < 0.1.10 < 0.2.0 < 0.10.0.
+      - name: Is this the newest release tag?
+        id: newest
+        run: |
+          set -euo pipefail
+          newest="v$(git tag -l 'v*' | sed '/-/d' | sed 's/^v//' | sort -V | tail -1)"
+          echo "newest release tag: $newest | this tag: $GITHUB_REF_NAME"
+          if [ "$newest" = "$GITHUB_REF_NAME" ]; then
+            echo "is_newest=true" >>"$GITHUB_OUTPUT"
+          else
+            echo "is_newest=false" >>"$GITHUB_OUTPUT"
+            echo "::notice::$GITHUB_REF_NAME is not the newest tag ($newest) — publishing version tags but NOT :latest"
+          fi
 
       # arm64 emulation so the image also runs on a Raspberry Pi. Only arm64 is
       # needed — the default 'all' registers ~10 unused binfmt handlers — and
@@ -79,12 +102,13 @@ jobs:
           flavor: latest=false
           # Non-semver tags (the current v0.1.9.4 style) make the semver rules
           # warn and skip; type=ref still yields the tag name, so a release is
-          # never left tag-less. Pre-release tags are excluded from `:latest`.
+          # never left tag-less. `:latest` requires BOTH that this is not a
+          # pre-release and that it is the newest release tag.
           tags: |
             type=ref,event=tag
             type=semver,pattern={{version}}
             type=semver,pattern={{major}}.{{minor}}
-            type=raw,value=latest,enable=${{ !contains(github.ref_name, '-') }}
+            type=raw,value=latest,enable=${{ steps.newest.outputs.is_newest == 'true' && !contains(github.ref_name, '-') }}
 
       - name: Build and push
         uses: docker/build-push-action@10e90e3645eae34f1e60eeb005ba3a3d33f178e8 # v6.19.2
