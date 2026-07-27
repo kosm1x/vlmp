@@ -107,6 +107,51 @@ Things worth knowing before you bump it:
 - `sort -V` orders the scheme correctly (`0.1.9 < 0.1.9.1 < 0.1.10 < 0.2.0`),
   which is what the release workflow's newest-tag check depends on.
 
+## Releasing
+
+The version bump must be **committed before the tag is pushed** — the release
+workflow compares the tag against `package.json` and both `package-lock.json`
+version fields and refuses to publish if they disagree.
+
+1. Bump `package.json` and both `version` fields in `package-lock.json`.
+2. Add a line to the README's `Shipped in v0.1.x` list.
+3. Commit and push to `master`; wait for CI to go green.
+4. Tag and push: `git tag -a vX.Y.Z.B -m "..." && git push origin vX.Y.Z.B`.
+
+Pushing the tag runs `.github/workflows/release.yml`, which re-runs the suite
+(`ci.yml` does not trigger on tags, so without this a tag cut from a red commit
+would publish) and then pushes a multi-arch image to GHCR.
+
+A release publishes two immutable names — `vX.Y.Z.B` and `X.Y.Z.B` — and moves
+the `X.Y.Z`, `X.Y` and `latest` pointers **only** if the tag is the highest
+non-pre-release tag in the repo. A pre-release (`v0.2.0.0-rc.1`) publishes its
+own names and moves nothing.
+
+Tags are immutable once they have published anything. If a tag is wrong, cut the
+next number rather than moving it.
+
+> `release.yml` publishes the container image only. The GitHub **Releases** page
+> is maintained by hand and will look out of date unless you add an entry.
+
+## Dependencies
+
+Automated version-update PRs were switched off on 2026-07-27 — they produced a
+backlog of major bumps aimed at the release pipeline faster than it was sensible
+to review them. Dependabot **security** updates remain enabled at the repository
+level, so known CVEs still arrive as PRs.
+
+That makes routine upgrades a manual, deliberate act:
+
+- Bump one thing at a time and let CI's image job prove the container still
+  builds and boots.
+- GitHub Actions are pinned to commit SHAs on purpose — the release job holds
+  `packages: write`, so a retagged upstream action could push an arbitrary image
+  to every user. Refresh those by hand.
+- `docker/metadata-action` deserves particular care: the guarded `:latest` logic
+  is built on verified v5 behaviour, so a major bump needs that behaviour
+  re-checked at the new SHA, ideally by running a `-rc` tag through the release
+  path first.
+
 ## Good first contributions
 
 - Documentation fixes and clarifications
