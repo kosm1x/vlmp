@@ -81,6 +81,27 @@ docker compose up -d
 
 Add `--build` only if you want to build from source instead of pulling.
 
+> **⚠ Upgrading from 0.1.9.4 or earlier — read this first.**
+> Those versions bind-mounted `./data`. This one uses a named volume, so a
+> plain `git pull && docker compose up -d` starts the server on **empty
+> storage**: no library, no accounts, no watch history, and a new federation
+> identity. Nothing warns you — the container is healthy, it is just a
+> different disk. Your old files are untouched in `./data`.
+>
+> Migrate first, with the stack stopped:
+>
+> ```bash
+> docker compose down
+> docker run --rm -v "$PWD/data":/from -v vlmp-data:/to alpine sh -c 'cp -a /from/. /to/'
+> docker compose up -d
+> ```
+>
+> Or keep your current layout: swap the volume line in `docker-compose.yml`
+> back to `./data:/data` and run `sudo chown 1000:1000 data` once.
+>
+> Note the first account to register becomes admin — so do not expose an
+> un-migrated instance to the internet before restoring your accounts.
+
 **Where your data lives.** The database, transcode cache and backups go in a Docker **named volume** (`vlmp-data`), not a folder in the repo. That is deliberate: the container runs as an unprivileged user, and a bind mount to a not-yet-existing host path is created root-owned, which used to make the very first `up` fail and restart forever. `docker compose down` keeps the volume — only `down -v` removes it. To back it up:
 
 ```bash
@@ -95,13 +116,13 @@ If you would rather keep data in a host folder, swap the volume line in `docker-
 
 | Tag          | Example    | Moves?                                   |
 | ------------ | ---------- | ---------------------------------------- |
-| `v<version>` | `v0.1.9.4` | Never — the git tag verbatim             |
-| Four parts   | `0.1.9.4`  | Never — a pointer is never four parts    |
+| `v<version>` | `v0.1.9.8` | Never — the git tag verbatim             |
+| Four parts   | `0.1.9.8`  | Never — a pointer is never four parts    |
 | Three parts  | `0.1.9`    | To the newest build on that patch line   |
 | Two parts    | `0.1`      | To the newest release on that minor line |
 | `latest`     | —          | To the newest release overall            |
 
-For a fully immutable pin use `v0.1.9.4` or the four-part `0.1.9.4`. Note the overlap: a release tagged with only three parts (`v0.2.0`) publishes `0.2.0`, and that same name later becomes the patch-line pointer when `v0.2.0.1` ships — so prefer the `v`-prefixed tag if you want a name that can never be reused.
+For a fully immutable pin use `v0.1.9.8` or the four-part `0.1.9.8`. (Container images start at **0.1.9.5** — earlier tags exist in git and as GitHub releases, but were never published to GHCR, so `0.1.9.4` and below are not pullable.) Note the overlap: a release tagged with only three parts (`v0.2.0`) publishes `0.2.0`, and that same name later becomes the patch-line pointer when `v0.2.0.1` ships — so prefer the `v`-prefixed tag if you want a name that can never be reused.
 
 Pointers only ever move forward, and pre-releases (`-rc.N`) never take one.
 

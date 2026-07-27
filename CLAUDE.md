@@ -59,7 +59,9 @@ npm run test         # vitest run
 - Config loaded at startup via `loadConfig()`, passed to modules
 - All JSON parsing wrapped in try/catch
 - FFmpeg/FFprobe via child_process.spawn
-- **Never signal a child without `isProcessAlive()`** (`streaming/transcoder.ts`).
+- **Never signal a child without `isProcessAlive()`** (`process-liveness.ts`, a
+  dependency-free module so scanner/metadata/streaming can all use it without
+  import cycles; re-exported from `streaming/transcoder.ts`).
   `ChildProcess.killed` only records that a signal was _sent_, so it is false for
   a reaped child too — killing on `!killed` targets a PID the kernel may have
   reassigned to an unrelated process. This applies in **tests as well**; the

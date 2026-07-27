@@ -99,6 +99,20 @@ jobs:
           esac
           exit $rc
 
+      # Belt and braces for the log: `cat` above only helps if the JOB survives
+      # to finish the step. A job cancelled mid-Test (job timeout, or a runner
+      # eviction) uploads no logs at all — the exact failure mode this whole
+      # block exists to defeat. An artifact is written by a separate step that
+      # runs `if: always()`.
+      - name: Upload test output
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: test-output-${{ github.job }}-${{ github.run_attempt }}
+          path: test-output.log
+          if-no-files-found: ignore
+          retention-days: 7
+
   # Gates the ARTIFACT, not just the source. `npm test` never builds the image, so
   # without this a change that breaks the container merges green and only fails on
   # a user's machine after release.yml publishes it — e.g. a base-image bump that

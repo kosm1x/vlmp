@@ -1,4 +1,5 @@
 import { spawn } from "node:child_process";
+import { isProcessAlive } from "../process-liveness.js";
 import type { Config } from "../config.js";
 
 // Hardware H.264 encoder selection. An encoder appearing in `ffmpeg
@@ -64,7 +65,8 @@ function probeEncode(ffmpegPath: string, encoder: string): Promise<boolean> {
     const timer = setTimeout(() => {
       if (!done) {
         done = true;
-        proc.kill("SIGKILL");
+        // Liveness, not the local flag — see streaming/transcoder.ts.
+        if (isProcessAlive(proc)) proc.kill("SIGKILL");
         resolve(false);
       }
     }, PROBE_TIMEOUT_MS);

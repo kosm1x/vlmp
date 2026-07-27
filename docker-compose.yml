@@ -59,6 +59,16 @@ services:
       #   restore   docker run --rm -v vlmp-data:/d -v "$PWD:/in" alpine \
       #               tar xzf /in/vlmp-data.tar.gz -C /d
       #
+      # ⚠ UPGRADING FROM 0.1.9.4 OR EARLIER? Those versions bind-mounted
+      # `./data`. Switching to this volume does NOT move your database — the
+      # server will start clean, with an empty library and no accounts, and
+      # nothing will warn you (it is a healthy container, just a new disk).
+      # Copy your data across FIRST, with the stack stopped:
+      #   docker run --rm -v "$PWD/data":/from -v vlmp-data:/to \
+      #     alpine sh -c 'cp -a /from/. /to/'
+      # Or keep your existing layout by using `- ./data:/data` below instead
+      # (that path needs `sudo chown 1000:1000 data` once).
+      #
       # Prefer a host directory anyway? Replace this line with `- ./data:/data`
       # and create it yourself first, owned by uid 1000:
       #   mkdir -p data && sudo chown 1000:1000 data
@@ -83,10 +93,16 @@ services:
         max-file: "3"
 
 volumes:
-  # Declared with no options so Docker manages it. `docker compose down` keeps
-  # it; only `down -v` deletes it, so a routine stop or upgrade cannot lose your
-  # library database.
   vlmp-data:
+    # `name:` is load-bearing, not cosmetic. Without it Compose prefixes the
+    # volume with the project name (`vlmp_vlmp-data`), and every `docker volume`
+    # command in the README — inspect, backup, restore — silently addresses a
+    # DIFFERENT, empty volume that it creates on the spot. The backup recipe
+    # then exits 0 having archived nothing. Pinning the name makes the
+    # documented commands true, and true in a clone under any directory name.
+    name: vlmp-data
+    # `docker compose down` keeps it; only `down -v` deletes it, so stopping or
+    # upgrading cannot lose your library database.
 
 # When you register library folders in the VLMP admin UI, use the CONTAINER
 # paths (e.g. /media/movies), not the host paths.

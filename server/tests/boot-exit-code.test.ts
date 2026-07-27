@@ -57,7 +57,7 @@ describe("startup failures are fatal", () => {
     const blocker = join(dir, "blocker");
     writeFileSync(blocker, "not a directory");
 
-    const { code, output } = await boot({
+    const { code, signal, output } = await boot({
       VLMP_DATA_DIR: join(blocker, "data"),
       // Never a real port: this must fail long before listen, and if it somehow
       // does not, binding something well out of the way beats a collision.
@@ -65,8 +65,14 @@ describe("startup failures are fatal", () => {
     });
 
     expect(output).toMatch(/ENOTDIR|uncaughtException/);
-    // The assertion that matters. Before the boot guard this was exactly 0.
-    expect(code, `expected a non-zero exit, got ${code}`).not.toBe(0);
+    // Assert the signal FIRST. A process killed by the spawn timeout reports
+    // code `null`, and `null` is not 0 — so a plain `not.toBe(0)` would have
+    // passed on a boot that hung instead of exiting, which is the opposite
+    // outcome from the one this test exists to prove.
+    expect(signal, "must exit on its own, not be killed by the timeout").toBe(
+      null,
+    );
+    expect(code, `expected exit 1, got code=${code} signal=${signal}`).toBe(1);
   }, 60_000);
 
   it("refuses to start without a JWT secret", async () => {

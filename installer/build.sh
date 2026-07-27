@@ -18,6 +18,18 @@ NSSM_VERSION=2.24
 NSSM_SHA256=727d1e42275c605e0f04aba98095c38a8e1e46def453cdffce42869428aa6743
 
 VERSION=$(node -p "require('$ROOT/package.json').version")
+# Provenance. This installer is built by hand, not by a workflow, so nothing
+# else records WHAT source produced it — and a dirty tree yields a file whose
+# name is identical to a tagged build's. Stamp it and say so loudly.
+GIT_DESC=$(git -C "$ROOT" describe --tags --always --dirty 2>/dev/null || echo "unknown")
+case "$GIT_DESC" in
+  *-dirty) echo "!! WARNING: working tree is DIRTY ($GIT_DESC)."
+           echo "!! The .exe will be named vlmp-setup-$VERSION-win-x64.exe, indistinguishable"
+           echo "!! from a clean build of tag v$VERSION. Do not publish this artifact." ;;
+  "v$VERSION") : ;;
+  *) echo "!! WARNING: HEAD is $GIT_DESC but package.json says $VERSION — the .exe"
+     echo "!! will claim v$VERSION. Publish only from a checkout of tag v$VERSION." ;;
+esac
 BS3_VERSION=$(node -p "require('$ROOT/node_modules/better-sqlite3/package.json').version")
 
 command -v makensis >/dev/null || { echo "makensis not found (apt install nsis)"; exit 1; }
@@ -53,14 +65,22 @@ echo "==> better-sqlite3 $BS3_VERSION win32-x64 prebuild (bundled in the npm pac
 # (~15MB of darwin/linux/musl/arm binaries that no Windows user can load).
 find "$STAGE/node_modules/better-sqlite3/prebuilds" -mindepth 1 -maxdepth 1 \
   ! -name 'win32-x64.node' -exec rm -rf {} +
-file "$STAGE/node_modules/better-sqlite3/prebuilds/win32-x64.node" | grep -q "PE32+" ||
-  { echo "better-sqlite3 win32-x64 prebuild missing from npm package"; exit 1; }
+# Match the ARCH too, not just "some Windows DLL". Both packages ship a
+# win32-arm64 build whose `file` output is also "PE32+ executable (DLL)", so a
+# bare PE32+ grep would happily accept an Aarch64 binary into an x64 installer
+# and only fail at runtime on the user's machine.
+file "$STAGE/node_modules/better-sqlite3/prebuilds/win32-x64.node" | grep -q "PE32+.*x86-64" ||
+  { echo "better-sqlite3 win32-x64 prebuild missing or not x86-64"; exit 1; }
 rm -rf "$STAGE/node_modules/better-sqlite3/deps" "$STAGE/node_modules/better-sqlite3/src"
 
 # bcrypt ships every platform's prebuild in the npm package — keep only ours.
 find "$STAGE/node_modules/bcrypt/prebuilds" -mindepth 1 -maxdepth 1 ! -name win32-x64 -exec rm -rf {} +
-file "$STAGE/node_modules/bcrypt/prebuilds/win32-x64/"*.node | grep -q "PE32+" ||
-  { echo "bcrypt win32-x64 prebuild missing from npm package"; exit 1; }
+# Checked per-file rather than through a glob: `file a b | grep -q` succeeds if
+# ANY line matches, so a glob would pass even with a foreign binary alongside.
+for b in "$STAGE/node_modules/bcrypt/prebuilds/win32-x64/"*.node; do
+  file "$b" | grep -q "PE32+.*x86-64" ||
+    { echo "bcrypt prebuild $b is missing or not x86-64"; exit 1; }
+done
 
 echo "==> Portable Node.js (latest v$NODE_MAJOR win-x64, checksum-verified)"
 SHAS=$(curl -fsSL "https://nodejs.org/dist/latest-v$NODE_MAJOR.x/SHASUMS256.txt")
@@ -96,4 +116,7 @@ EXE="$OUT/vlmp-setup-$VERSION-win-x64.exe"
 [ -f "$EXE" ] || { echo "makensis did not produce $EXE"; exit 1; }
 echo "==> Done"
 ls -lh "$EXE"
-sha256sum "$EXE"
+# Record the digest next to the artifact instead of only printing it, so the
+# value published on the release page can be diffed against a rebuild.
+sha256sum "$EXE" | tee "$EXE.sha256"
+echo "built from: $GIT_DESC"
