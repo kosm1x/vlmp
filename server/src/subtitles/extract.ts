@@ -1,8 +1,16 @@
 import { spawn } from "node:child_process";
 import { mkdirSync } from "node:fs";
 import { resolve } from "node:path";
+import { isProcessAlive } from "../process-liveness.js";
 import type { Config } from "../config.js";
 import type { SubtitleTrack } from "../scanner/probe.js";
+
+// Extraction demuxes the ENTIRE container (unlike ffprobe, which reads
+// headers), so the bound must accommodate a big file on a slow network mount.
+// 15 minutes is far past any healthy extract; past it we assume the mount or
+// drive is wedged — the case that otherwise strands the folder at
+// scan_status='scanning' forever, since library.ts awaits this in-line.
+const EXTRACT_TIMEOUT_MS = 15 * 60_000;
 
 export interface ExtractedSubtitle {
   language: string | null;
@@ -71,10 +79,27 @@ function runFFmpegExtract(
       output,
     ]);
     let stderr = "";
+    let killed = false;
+    const timer = setTimeout(() => {
+      if (!killed) {
+        killed = true;
+        // isProcessAlive, not a local flag — same reaped-PID reasoning as
+        // scanner/probe.ts.
+        if (isProcessAlive(proc)) proc.kill("SIGKILL");
+        reject(
+          new Error(
+            `FFmpeg subtitle extract timed out after ${EXTRACT_TIMEOUT_MS}ms: ${input}`,
+          ),
+        );
+      }
+    }, EXTRACT_TIMEOUT_MS);
+    timer.unref();
     proc.stderr.on("data", (d: Buffer) => {
       stderr += d.toString();
     });
     proc.on("close", (code) => {
+      clearTimeout(timer);
+      if (killed) return;
       code === 0
         ? resolve()
         : reject(
@@ -83,6 +108,9 @@ function runFFmpegExtract(
             ),
           );
     });
-    proc.on("error", reject);
+    proc.on("error", (err) => {
+      clearTimeout(timer);
+      if (!killed) reject(err);
+    });
   });
 }

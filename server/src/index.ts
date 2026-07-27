@@ -81,7 +81,9 @@ for (const [name, bin] of [
   ["ffmpeg", config.ffmpegPath],
   ["ffprobe", config.ffprobePath],
 ] as const) {
-  execFile(bin, ["-version"], (err, stdout) => {
+  // The 10s timeout covers a binary on a wedged network mount, which would
+  // otherwise leak this child for the process lifetime.
+  execFile(bin, ["-version"], { timeout: 10_000 }, (err, stdout) => {
     if (err) {
       console.warn(
         `[preflight] ${name} not found at "${bin}" — scanning/transcoding will fail. Install FFmpeg or set VLMP_${name.toUpperCase()}_PATH.`,
