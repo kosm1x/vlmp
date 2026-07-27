@@ -1,9 +1,15 @@
 # syntax=docker/dockerfile:1
 
 # ── Stage 1: build ──────────────────────────────────────────────────
-# Full bookworm image: has the toolchain needed to compile the native
+# Full trixie image: has the toolchain needed to compile the native
 # better-sqlite3 / bcrypt bindings against the exact runtime ABI.
-FROM node:22-bookworm AS builder
+#
+# Trixie (Debian 13) rather than bookworm (12) because of FFmpeg, which the
+# runtime stage inherits: bookworm's newest is 5.1, and transcode pacing wants
+# -readrate_initial_burst, which needs >= 6.1 (see streaming/ffmpeg-caps.ts).
+# On bookworm that flag silently never applies. Both stages move together — the
+# runtime note below explains why they must match.
+FROM node:22-trixie AS builder
 
 WORKDIR /app
 
@@ -50,9 +56,12 @@ RUN rm -rf \
 
 
 # ── Stage 2: runtime ────────────────────────────────────────────────
-# Slim runtime on the SAME base (bookworm) so the compiled native
-# bindings from the builder are ABI-compatible. Only FFmpeg is added.
-FROM node:22-bookworm-slim AS runtime
+# Slim runtime on the SAME base (trixie) so the compiled native bindings from
+# the builder are ABI-compatible. Only FFmpeg is added. Keep these two stages on
+# the same Debian release: building against a NEWER glibc than the runtime
+# provides fails at load time, and the pair drifting apart is precisely what the
+# image job in ci.yml exists to catch.
+FROM node:22-trixie-slim AS runtime
 
 # FFmpeg + FFprobe (the whole point of the app) and tini for clean PID 1
 RUN apt-get update && apt-get install -y --no-install-recommends \
