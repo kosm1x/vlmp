@@ -123,7 +123,12 @@ export function startProfileTranscode(
   const profile = session.profiles.find((p) => p.name === profileName);
   if (!profile) return null;
   const existing = session.jobs.get(profileName);
-  if (existing && !existing.process.killed) existing.process.kill("SIGTERM");
+  // `killed` only records that a signal was SENT — it is false for a process
+  // that exited on its own, so it is not a liveness check. Signalling an exited
+  // child asks the OS to signal a PID that has been reaped and may already
+  // belong to something else. See destroySession for the full note.
+  if (existing && !existing.exited && !existing.process.killed)
+    existing.process.kill("SIGTERM");
   // Segment numbers ARE absolute media time (n * SEGMENT_SECONDS): the
   // synthesized VOD playlist has no offset, so the ffmpeg input seek and
   // -start_number derive directly from the segment number.
@@ -260,7 +265,18 @@ export function destroySession(id: string): void {
   const session = sessions.get(id);
   if (!session) return;
   for (const job of session.jobs.values()) {
-    if (!job.process.killed) job.process.kill("SIGTERM");
+    // `!job.exited` is load-bearing, not belt-and-braces. `process.killed` means
+    // "a signal was sent", NOT "the process is alive": for an ffmpeg that exited
+    // on its own it stays false, so without this guard we call kill() on a
+    // reaped PID. The kernel may have recycled that PID, in which case the
+    // SIGTERM lands on an unrelated process — EPERM if it belongs to another
+    // user, delivered silently if it happens to be ours.
+    //
+    // Not theoretical: this fired in CI, where the recycled PID was the test
+    // runner itself, killing `npm test` about a second in with exit 137 and a
+    // "[transcode] spawn failed: kill EPERM" alongside it. The sibling guard in
+    // cleanupIdleSessions below already checks `exited`; these two did not.
+    if (!job.exited && !job.process.killed) job.process.kill("SIGTERM");
   }
   const firstJob = session.jobs.values().next().value;
   if (firstJob) {
