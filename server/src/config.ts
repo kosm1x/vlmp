@@ -24,6 +24,7 @@ export interface Config {
   emptyTrashOnScan: boolean;
   extractSubsOnScan: boolean;
   minDurationSeconds: number;
+  autoRescanCooldownSeconds: number;
   ffprobeTimeoutMs: number;
   backupDir: string;
   backupIntervalHours: number;
@@ -174,6 +175,18 @@ export function loadConfig(): Config {
       `Invalid VLMP_MIN_DURATION_SECONDS: ${process.env.VLMP_MIN_DURATION_SECONDS}. Must be >= 0 (0 disables).`,
     );
   }
+  // View-triggered rescan: opening a category page refreshes that category's
+  // folders in the background, at most once per cooldown window per folder.
+  // 0 disables the feature entirely (manual Scan in Settings still works).
+  const autoRescanCooldownSeconds = parseInt(
+    process.env.VLMP_AUTO_RESCAN_COOLDOWN_SECONDS || "300",
+    10,
+  );
+  if (isNaN(autoRescanCooldownSeconds) || autoRescanCooldownSeconds < 0) {
+    throw new Error(
+      `Invalid VLMP_AUTO_RESCAN_COOLDOWN_SECONDS: ${process.env.VLMP_AUTO_RESCAN_COOLDOWN_SECONDS}. Must be >= 0 (0 disables).`,
+    );
+  }
   const tmdbApiKey = process.env.VLMP_TMDB_API_KEY || "";
   if (!tmdbApiKey) {
     console.warn(
@@ -210,6 +223,7 @@ export function loadConfig(): Config {
     // pre-warm subtitles overnight.
     extractSubsOnScan: process.env.VLMP_EXTRACT_SUBS_ON_SCAN === "true",
     minDurationSeconds,
+    autoRescanCooldownSeconds,
     ffprobeTimeoutMs: parseInt(
       process.env.VLMP_FFPROBE_TIMEOUT_MS || "30000",
       10,

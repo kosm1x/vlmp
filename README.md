@@ -41,7 +41,8 @@ If that scope fits how you actually watch, welcome.
 - **Adaptive bitrate streaming** — On-the-fly HLS transcoding via FFmpeg (1080p/720p/480p/360p); playback recovers from a transient segment hiccup instead of erroring out
 - **Continuous playback** — Start a series or playlist and it plays through to the end, auto-advancing episode to episode (or a manual ⏭ to skip)
 - **Direct play** — Zero-transcode for browser-compatible formats (H.264 MP4, WebM, etc.)
-- **Smart library scanning** — Recursive discovery with automatic classification (movies, TV, documentaries, education); sample/trailer video clips shorter than 2 minutes are ignored (`VLMP_MIN_DURATION_SECONDS`, 0 disables; audio is never filtered)
+- **Smart library scanning** — Recursive discovery with automatic classification (movies, TV, documentaries, education); sample/trailer video clips shorter than 2 minutes are ignored (`VLMP_MIN_DURATION_SECONDS`, 0 disables; audio is never filtered — numbered lessons and `SxxEyy` episodes are always kept)
+- **View-triggered rescan** — Opening a category quietly rescans exactly that category's folders in the background and refreshes the page when new files land; at most once per folder per cooldown window (`VLMP_AUTO_RESCAN_COOLDOWN_SECONDS`, default 300, 0 disables)
 - **Incremental metadata** — A metadata fetch only touches new/unmatched titles, not the whole library; unmatchable files are remembered so they aren't re-queried every run (`{"full": true}` forces a complete re-fetch)
 - **Custom categories** — Create, rename, or delete your own nav categories (defaults included); each is "single titles" or "series". The category bar scrolls, so any number of them stays reachable
 - **Playback has priority** — Streaming (HLS segments, direct play) is never rate-limited, so background work — a metadata fetch, browsing, a busy household — can't 429 what's playing (`VLMP_RATE_LIMIT_MAX` tunes the control-plane ceiling, default 600/min)

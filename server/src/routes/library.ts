@@ -279,6 +279,29 @@ export function registerLibraryRoutes(
     },
   );
 
+  // Fire-and-forget scan launch, shared by the admin route and the
+  // view-triggered refresh. Callers must hold the atomic 'scanning' claim.
+  // Holding the request open for a whole-library scan meant proxy
+  // idle-timeouts aborted the response and a dead client connection was
+  // indistinguishable from a dead scan — clients poll scan status instead.
+  const runBackgroundScan = (
+    folder: LibraryFolder,
+    log: FastifyRequest["log"],
+  ): void => {
+    scanLibraryFolder(db, folder, config).catch((err) => {
+      log.error({ err, folder_id: folder.id }, "background scan failed");
+      // scanLibraryFolder sets 'error' itself before rethrowing; this covers
+      // a reject before its try block so the claim can't stick as 'scanning'.
+      try {
+        db.prepare(
+          "UPDATE library_folders SET scan_status = 'error' WHERE id = ? AND scan_status = 'scanning'",
+        ).run(folder.id);
+      } catch {
+        /* status reset is best-effort */
+      }
+    });
+  };
+
   app.post<{ Params: { id: string } }>(
     "/admin/folders/:id/scan",
     { preHandler: [auth, adminOnly] },
@@ -297,23 +320,70 @@ export function registerLibraryRoutes(
         .run(id);
       if (claimed.changes === 0)
         return reply.code(409).send({ error: "Scan already running" });
-      // Fire-and-forget: holding the request open for a whole-library scan
-      // meant proxy idle-timeouts aborted the response and a dead client
-      // connection was indistinguishable from a dead scan. The client polls
-      // scan_status instead, and scanLibraryFolder records completion/error.
-      scanLibraryFolder(db, folder, config).catch((err) => {
-        request.log.error({ err, folder_id: id }, "background scan failed");
-        // scanLibraryFolder sets 'error' itself before rethrowing; this covers
-        // a reject before its try block so the claim can't stick as 'scanning'.
-        try {
-          db.prepare(
-            "UPDATE library_folders SET scan_status = 'error' WHERE id = ? AND scan_status = 'scanning'",
-          ).run(id);
-        } catch {
-          /* status reset is best-effort */
-        }
-      });
+      runBackgroundScan(folder, request.log);
       return reply.code(202).send({ folder_id: id, status: "scanning" });
     },
+  );
+
+  // View-triggered rescan: the client pings this when a user OPENS a category
+  // page, so exactly the folders behind the current screen refresh — no
+  // filesystem watcher, no whole-library sweeps. Cooldown state is in-process
+  // on purpose: last_scanned only advances on success, and a folder stuck in
+  // 'error' (unmounted drive) must not re-walk on every page view.
+  const lastAutoRescan = new Map<number, number>();
+  const scanningInCategory = (slug: string, includeHidden: boolean): boolean =>
+    !!db
+      .prepare(
+        `SELECT 1 FROM library_folders WHERE category = ? AND scan_status = 'scanning'${includeHidden ? "" : " AND is_visible = 1"} LIMIT 1`,
+      )
+      .get(slug);
+
+  app.post<{ Params: { slug: string } }>(
+    "/library/categories/:slug/refresh",
+    { preHandler: auth },
+    async (request) => {
+      const { slug } = request.params;
+      const admin = request.user!.role === "admin";
+      const cooldownMs = config.autoRescanCooldownSeconds * 1000;
+      if (cooldownMs === 0) return { started: 0, scanning: false };
+      // Non-admins may only refresh — and observe — folders they can see; a
+      // hidden category answers exactly like an empty one.
+      const folders = db
+        .prepare(
+          `SELECT * FROM library_folders WHERE category = ?${admin ? "" : " AND is_visible = 1"}`,
+        )
+        .all(slug) as LibraryFolder[];
+      let started = 0;
+      const now = Date.now();
+      for (const folder of folders) {
+        if (now - (lastAutoRescan.get(folder.id) ?? 0) < cooldownMs) continue;
+        // Same atomic claim as the admin route — never two scans of a folder.
+        const claimed = db
+          .prepare(
+            "UPDATE library_folders SET scan_status = 'scanning' WHERE id = ? AND scan_status != 'scanning'",
+          )
+          .run(folder.id);
+        if (claimed.changes === 0) continue;
+        lastAutoRescan.set(folder.id, now);
+        started++;
+        runBackgroundScan(folder, request.log);
+      }
+      return {
+        started,
+        scanning: started > 0 || scanningInCategory(slug, admin),
+      };
+    },
+  );
+
+  // Cheap poll target for the client while a view-triggered refresh runs.
+  app.get<{ Params: { slug: string } }>(
+    "/library/categories/:slug/scan-status",
+    { preHandler: auth },
+    async (request) => ({
+      scanning: scanningInCategory(
+        request.params.slug,
+        request.user!.role === "admin",
+      ),
+    }),
   );
 }

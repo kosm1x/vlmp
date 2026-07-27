@@ -1,7 +1,7 @@
 import { h } from "preact";
 import { useState, useEffect, useRef, useMemo } from "preact/hooks";
 import htm from "htm";
-import { get, getUserRole, getUserId } from "../api.js";
+import { get, post, getUserRole, getUserId } from "../api.js";
 import { fetchCategories } from "../categories.js";
 import { MediaCard } from "./MediaCard.js";
 import { ShowCard } from "./ShowCard.js";
@@ -217,6 +217,42 @@ function CategoryGrid({ category }) {
       });
   }, [category]);
 
+  // View-triggered rescan: opening a category asks the server to refresh
+  // exactly this category's folders (server enforces a per-folder cooldown,
+  // so most visits are a no-op). While a scan runs, poll cheaply; when it
+  // settles, drop only this slug's cache and re-render with what it found.
+  useEffect(() => {
+    const gen = genRef.current;
+    const enc = encodeURIComponent(category);
+    let timer;
+    let stopped = false;
+    const poll = async () => {
+      if (stopped || gen !== genRef.current) return;
+      try {
+        const s = await get(`/library/categories/${enc}/scan-status`);
+        if (stopped || gen !== genRef.current) return;
+        if (s && s.scanning) {
+          timer = setTimeout(poll, 3000);
+          return;
+        }
+        fullCache.delete(cacheKey(category));
+        const d = await loadCategoryFull(category);
+        if (!stopped && gen === genRef.current) setData(d);
+      } catch {
+        /* best-effort — the manual Scan button in Settings still exists */
+      }
+    };
+    post(`/library/categories/${enc}/refresh`)
+      .then((res) => {
+        if (!stopped && res && res.scanning) timer = setTimeout(poll, 2000);
+      })
+      .catch(() => {});
+    return () => {
+      stopped = true;
+      clearTimeout(timer);
+    };
+  }, [category]);
+
   // Folder sections come first, mirroring the on-disk structure in their
   // numbered sequence; only the remaining loose cards obey the sort selector.
   const { groups, loose } = useMemo(
@@ -318,8 +354,8 @@ function CategoryGrid({ category }) {
           <h2>${g.title}</h2>
           <div class="category-grid">
             ${g.items.map(
-            (i) => html`<${MediaCard} key=${"item-" + i.id} item=${i} />`,
-          )}
+              (i) => html`<${MediaCard} key=${"item-" + i.id} item=${i} />`,
+            )}
           </div>
         </div>`,
     )}
