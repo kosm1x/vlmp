@@ -40,7 +40,10 @@ describe("guest pass hardening", () => {
     expect(codes.size).toBe(100);
   });
 
-  it("validateGuestPass is atomic (concurrent calls respect max_views)", () => {
+  // Renamed from "is atomic (concurrent calls...)": the three calls below are
+  // strictly sequential, so atomicity was asserted only in the title. What IS
+  // pinned: the counter enforces max_views across successive validations.
+  it("sequential validations stop at max_views", () => {
     const pass = createGuestPass(db, 1, 1, 48, 2);
     // Simulate concurrent validation — in SQLite with transactions, these are serialized
     const r1 = validateGuestPass(db, pass.code);

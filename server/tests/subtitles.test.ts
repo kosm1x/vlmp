@@ -6,7 +6,23 @@ import {
   getSubtitlesForMedia,
   deleteSubtitlesForMedia,
 } from "../src/subtitles/service.js";
-import type { ExtractedSubtitle } from "../src/subtitles/extract.js";
+import {
+  extractSubtitles,
+  type ExtractedSubtitle,
+} from "../src/subtitles/extract.js";
+import type { SubtitleTrack } from "../src/scanner/probe.js";
+import type { Config } from "../src/config.js";
+
+// File-scope on purpose: vitest hoists vi.mock to the top of the file no
+// matter where it is written, so the previous copies INSIDE an it() were
+// already file-wide — this just makes that visible. The DB tests never import
+// either module (better-sqlite3 is native CJS, untouched by ESM mocks).
+const spawnMock = vi.hoisted(() => vi.fn());
+vi.mock("node:child_process", () => ({ spawn: spawnMock }));
+vi.mock("node:fs", async (importOriginal) => {
+  const orig = (await importOriginal()) as typeof import("node:fs");
+  return { ...orig, mkdirSync: vi.fn() };
+});
 
 let db: Database.Database;
 
@@ -131,51 +147,34 @@ describe("subtitle service", () => {
   });
 
   describe("subtitle extraction args", () => {
-    it("should skip bitmap subtitle codecs", async () => {
-      // We test the BITMAP_CODECS check by importing extract.ts and using a mock
-      const { extractSubtitles } = await import("../src/subtitles/extract.js");
+    it("skips bitmap codecs — ffmpeg runs only for text tracks", async () => {
+      // The old version of this test asserted a literal array contains its own
+      // literal element; it passed with extract.ts deleted. This one counts
+      // real spawn calls, so removing the BITMAP_CODECS check makes it fail.
+      spawnMock.mockReset();
+      spawnMock.mockImplementation(() => ({
+        stderr: { on: vi.fn() },
+        on: vi.fn((event: string, cb: (code: number) => void) => {
+          if (event === "close") cb(0);
+        }),
+      }));
       const config = {
         subtitleDir: "/tmp/test-subs",
         ffmpegPath: "ffmpeg",
-      } as any;
-
-      // Mock spawn to track FFmpeg calls
-      const { spawn } = await import("node:child_process");
-      vi.mock("node:child_process", () => ({
-        spawn: vi.fn().mockReturnValue({
-          stderr: { on: vi.fn() },
-          on: vi.fn((event: string, cb: Function) => {
-            if (event === "close") cb(0);
-          }),
-        }),
-      }));
-      vi.mock("node:fs", async (importOriginal) => {
-        const orig = (await importOriginal()) as any;
-        return { ...orig, mkdirSync: vi.fn() };
-      });
-
-      const tracks = [
+      } as unknown as Config;
+      const tracks: SubtitleTrack[] = [
         { index: 0, language: "en", codec: "subrip", title: "English" },
-        {
-          index: 1,
-          language: null,
-          codec: "hdmv_pgs_subtitle",
-          title: "PGS",
-        },
-        {
-          index: 2,
-          language: "es",
-          codec: "dvd_subtitle",
-          title: "DVD subs",
-        },
+        { index: 1, language: null, codec: "hdmv_pgs_subtitle", title: "PGS" },
+        { index: 2, language: "es", codec: "dvd_subtitle", title: "DVD subs" },
       ];
 
-      // The bitmap codecs should be skipped (only index 0 processed)
-      // We can't easily test the full flow without a real ffmpeg,
-      // but we verify the codec check logic exists
-      expect(["hdmv_pgs_subtitle", "dvd_subtitle", "dvb_subtitle"]).toContain(
-        "hdmv_pgs_subtitle",
-      );
+      const results = await extractSubtitles("/x/test.mkv", 1, tracks, config);
+
+      expect(spawnMock).toHaveBeenCalledTimes(1);
+      const ffmpegArgs = spawnMock.mock.calls[0][1] as string[];
+      expect(ffmpegArgs).toContain("0:s:0");
+      expect(results).toHaveLength(1);
+      expect(results[0].language).toBe("en");
     });
   });
 });

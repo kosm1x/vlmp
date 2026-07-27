@@ -216,6 +216,8 @@ describe("recommender", () => {
     logViewingEvent(db, 1, 3, 7000, 7200, true);
 
     const result = getRecommendations(db, 1);
+    // Non-empty first: an empty result set satisfies every exclusion check.
+    expect(result.items.length).toBeGreaterThan(0);
     const recIds = new Set(result.items.map((i) => i.media_id));
     expect(recIds.has(1)).toBe(false);
     expect(recIds.has(2)).toBe(false);
@@ -227,6 +229,8 @@ describe("recommender", () => {
     setPreference(db, 1, 5, "dislike");
 
     const result = getRecommendations(db, 1);
+    // Non-empty first: an empty result set satisfies every exclusion check.
+    expect(result.items.length).toBeGreaterThan(0);
     const recIds = result.items.map((i) => i.media_id);
     expect(recIds).not.toContain(5);
   });
@@ -240,16 +244,19 @@ describe("recommender", () => {
     expect(ids).not.toContain(1); // Not the item itself
   });
 
-  it("deduplication keeps highest score per media_id", () => {
-    // Create scenario where same item appears in multiple strategies
+  // Titled for what is ASSERTED. "keeps highest score per media_id" was never
+  // checked (no score inspected — a keep-lowest mutant passed); that claim
+  // needs a fixture that forces a cross-strategy overlap, queued in the audit
+  // doc.
+  it("deduplication: no media_id appears twice across strategies", () => {
     logViewingEvent(db, 1, 1, 7000, 7200, true);
     logViewingEvent(db, 1, 2, 7000, 7200, true);
     logViewingEvent(db, 1, 3, 7000, 7200, true);
 
     const result = getRecommendations(db, 1);
+    expect(result.items.length).toBeGreaterThan(0);
     const mediaIds = result.items.map((i) => i.media_id);
     const uniqueIds = new Set(mediaIds);
-    // No duplicates
     expect(mediaIds.length).toBe(uniqueIds.size);
   });
 });

@@ -225,12 +225,36 @@ describe("health report", () => {
     db.pragma("foreign_keys = ON");
 
     const report = await generateHealthReport(db);
-    expect(report.summary.orphaned_entries).toBeGreaterThanOrEqual(1);
+    // Exactly 1: the fixture holds one valid episode and one orphan. `>= 1`
+    // also passed when the detector flagged the VALID episode — the false
+    // positive orphan detection exists to avoid.
+    expect(report.summary.orphaned_entries).toBe(1);
     const orphanIssues = report.issues.filter((i) => i.type === "orphaned");
-    expect(orphanIssues.length).toBeGreaterThanOrEqual(1);
+    expect(orphanIssues).toHaveLength(1);
   });
 
   it("cleanupOrphaned removes orphaned entries and returns count", () => {
+    // A valid episode that must SURVIVE: with the orphan as the table's only
+    // row, this fixture could not tell cleanupOrphaned from
+    // `DELETE FROM episodes`.
+    db.prepare(
+      "INSERT INTO tv_shows (title, year, folder_path) VALUES (?, ?, ?)",
+    ).run("Kept Show", 2022, "/test/tv/keptshow");
+    db.prepare(
+      "INSERT INTO seasons (show_id, season_number) VALUES (?, ?)",
+    ).run(1, 1);
+    db.prepare(
+      "INSERT INTO media_items (library_folder_id, type, file_path, title, sort_title) VALUES (?, ?, ?, ?, ?)",
+    ).run(1, "episode", "/test/tv/kept.mp4", "Kept", "kept");
+    const keptMediaId = (
+      db.prepare("SELECT id FROM media_items WHERE title = 'Kept'").get() as {
+        id: number;
+      }
+    ).id;
+    db.prepare(
+      "INSERT INTO episodes (season_id, media_id, episode_number) VALUES (?, ?, ?)",
+    ).run(1, keptMediaId, 1);
+
     // Insert orphaned episode
     db.pragma("foreign_keys = OFF");
     db.prepare(
@@ -249,15 +273,16 @@ describe("health report", () => {
     const before = db.prepare("SELECT COUNT(*) as c FROM episodes").get() as {
       c: number;
     };
-    expect(before.c).toBe(1);
+    expect(before.c).toBe(2);
 
     const result = cleanupOrphaned(db);
-    expect(result.removed).toBeGreaterThanOrEqual(1);
+    expect(result.removed).toBe(1);
 
-    const after = db.prepare("SELECT COUNT(*) as c FROM episodes").get() as {
-      c: number;
-    };
-    expect(after.c).toBe(0);
+    const after = db.prepare("SELECT season_id FROM episodes").all() as {
+      season_id: number;
+    }[];
+    expect(after).toHaveLength(1);
+    expect(after[0].season_id).toBe(1); // the valid episode survived
   });
 
   it("missing files detected for nonexistent paths", async () => {

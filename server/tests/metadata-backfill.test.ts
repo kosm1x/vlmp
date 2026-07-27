@@ -220,7 +220,9 @@ describe("POST /admin/metadata/scan", () => {
     await waitForIdle();
   });
 
-  it("503s without a TMDb key and requires admin", async () => {
+  // Title matches the assertion: only the 503 is checked here. Admin gating
+  // has no coverage in this file — queued in the audit doc.
+  it("503s when no TMDb key is configured", async () => {
     const keyless = Fastify();
     const kdb = new Database(":memory:");
     kdb.pragma("foreign_keys = ON");

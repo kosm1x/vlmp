@@ -55,7 +55,7 @@ describe("viewing log", () => {
     expect(history[0].completed).toBe(0);
   });
 
-  it("inserts non-completion events (dedup relies on timestamp)", () => {
+  it("dedups a second non-completion event inside the window", () => {
     logViewingEvent(db, 1, 1, 2000, 7200, false);
     // Second insert within dedup window is skipped
     logViewingEvent(db, 1, 1, 2500, 7200, false);

@@ -1,3 +1,4 @@
+import { createHmac } from "node:crypto";
 import { describe, it, expect } from "vitest";
 import {
   generateSubtitleToken,
@@ -13,11 +14,18 @@ describe("subtitle HMAC tokens", () => {
   });
 
   it("expired token returns false", () => {
-    const { token } = generateSubtitleToken(SECRET, "42", "7");
-    // Manually create an expired token
-    const parts = token.split(":");
-    const expiredToken = `${parts[0]}:${Date.now() - 1000}`;
-    expect(validateSubtitleToken(SECRET, "42", "7", expiredToken)).toBe(false);
+    // Sign the past expiry with the REAL HMAC. Splicing a new expiry onto an
+    // old signature also invalidates the signature, so that variant passed via
+    // the timingSafeEqual branch and proved nothing about the expiry guard —
+    // deleting `Date.now() > expires` from tokens.ts left it green. This form
+    // is rejected ONLY if the expiry branch does its job.
+    const expires = Date.now() - 1000;
+    const signature = createHmac("sha256", SECRET)
+      .update(`42:7:${expires}`)
+      .digest("hex");
+    expect(
+      validateSubtitleToken(SECRET, "42", "7", `${signature}:${expires}`),
+    ).toBe(false);
   });
 
   it("wrong subtitleId returns false", () => {
