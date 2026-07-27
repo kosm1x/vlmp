@@ -19,6 +19,7 @@ Server handles transcoding, metadata, subtitles. Client is a thin Preact shell s
 | `server/src/media/categories.ts`            | User-managed categories (slug/kind CRUD, rename, delete guard)       |
 | `server/src/subtitles/opensubtitles.ts`     | OpenSubtitles search/download + SRT→VTT                              |
 | `server/src/scanner/probe.ts`               | FFprobe wrapper                                                      |
+| `server/src/process-liveness.ts`            | `isProcessAlive` — the only safe guard before signalling a child     |
 | `server/src/streaming/transcoder.ts`        | FFmpeg HLS pipeline (paced via -readrate)                            |
 | `server/src/streaming/session.ts`           | Stream session manager + on-demand segment encode                    |
 | `server/src/streaming/playback-decision.ts` | Direct-vs-transcode decision + play-time re-probe of null-codec rows |

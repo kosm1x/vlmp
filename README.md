@@ -93,9 +93,12 @@ Add `--build` only if you want to build from source instead of pulling.
 >
 > ```bash
 > docker compose down
-> test -f data/vlmp.db || { echo "no ./data/vlmp.db here — nothing to migrate"; exit 1; }
-> docker run --rm -v "$PWD/data":/from -v vlmp-data:/to alpine \
->   sh -c 'cp -a /from/. /to/ && chown -R 1000:1000 /to'
+> if [ -f data/vlmp.db ]; then
+>   docker run --rm -v "$PWD/data":/from -v vlmp-data:/to alpine \
+>     sh -c 'cp -a /from/. /to/ && chown -R 1000:1000 /to'
+> else
+>   echo "no ./data/vlmp.db here — nothing to migrate"
+> fi
 > docker compose up -d
 > ```
 >
