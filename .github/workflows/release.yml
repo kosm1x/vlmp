@@ -68,8 +68,16 @@ jobs:
       # ci.yml, because the fix landed in one file and not its sibling.
       - name: Test
         run: |
+          # NOT `; rc=$?` — GitHub invokes step scripts as `bash -e {0}`, and
+          # `set -uo pipefail` does not cancel that -e. With a bare `; rc=$?` the
+          # shell exits AT the timeout line the moment npm test fails, so the cat
+          # and the diagnostics below never run: the instrumentation would be
+          # dead in exactly the case it exists for. Observed on master run
+          # 30239937105, which reported only "exit code 137" and no test output.
+          # `|| rc=$?` puts the command in an OR list, which -e does not trap.
           set -uo pipefail
-          timeout --kill-after=60s 300 npm test >test-output.log 2>&1; rc=$?
+          rc=0
+          timeout --kill-after=60s 300 npm test >test-output.log 2>&1 || rc=$?
           cat test-output.log
           pkill -x ffmpeg 2>/dev/null || true
           pkill -x ffprobe 2>/dev/null || true
