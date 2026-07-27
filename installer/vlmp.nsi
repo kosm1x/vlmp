@@ -77,6 +77,12 @@ SectionEnd
 Section "Windows Firewall rule (TCP 8080)" SEC_FW
   nsExec::ExecToLog 'netsh advfirewall firewall add rule name="VLMP" dir=in action=allow protocol=TCP localport=8080'
   Pop $0
+  ; Same shape as the FFmpeg section below: the user ticked this component, so
+  ; a silent failure means they believe LAN clients can reach the server.
+  StrCmp $0 "0" fw_done
+    DetailPrint "Firewall rule was NOT added (code $0)."
+    DetailPrint "Add it manually: netsh advfirewall firewall add rule name=VLMP dir=in action=allow protocol=TCP localport=8080"
+  fw_done:
 SectionEnd
 
 Section "Install FFmpeg via winget (~100 MB download)" SEC_FFMPEG

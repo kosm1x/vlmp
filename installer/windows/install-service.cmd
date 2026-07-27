@@ -67,18 +67,38 @@ if errorlevel 1 (
   exit /b 1
 )
 rem "%VLMP_HOME%." -- the trailing dot stops the final backslash from escaping the closing quote.
-"%NSSM%" set VLMP DisplayName "VLMP Media Server"
-"%NSSM%" set VLMP Description "Very Light Media Player server"
-"%NSSM%" set VLMP AppDirectory "%VLMP_HOME%."
-"%NSSM%" set VLMP AppEnvironmentExtra "VLMP_DATA_DIR=%DATA%" "VLMP_JWT_SECRET_FILE=%DATA%\jwt.secret"
-"%NSSM%" set VLMP AppStdout "%DATA%\logs\out.log"
-"%NSSM%" set VLMP AppStderr "%DATA%\logs\err.log"
-"%NSSM%" set VLMP AppRotateFiles 1
-"%NSSM%" set VLMP AppRotateBytes 10485760
-"%NSSM%" set VLMP Start SERVICE_AUTO_START
+rem Every set is checked: a silently failed AppEnvironmentExtra means a service
+rem that starts with no VLMP_DATA_DIR and no JWT secret path.
+set NSSM_RC=0
+"%NSSM%" set VLMP DisplayName "VLMP Media Server" || set NSSM_RC=1
+"%NSSM%" set VLMP Description "Very Light Media Player server" || set NSSM_RC=1
+"%NSSM%" set VLMP AppDirectory "%VLMP_HOME%." || set NSSM_RC=1
+"%NSSM%" set VLMP AppEnvironmentExtra "VLMP_DATA_DIR=%DATA%" "VLMP_JWT_SECRET_FILE=%DATA%\jwt.secret" || set NSSM_RC=1
+"%NSSM%" set VLMP AppStdout "%DATA%\logs\out.log" || set NSSM_RC=1
+"%NSSM%" set VLMP AppStderr "%DATA%\logs\err.log" || set NSSM_RC=1
+"%NSSM%" set VLMP AppRotateFiles 1 || set NSSM_RC=1
+"%NSSM%" set VLMP AppRotateBytes 10485760 || set NSSM_RC=1
+"%NSSM%" set VLMP Start SERVICE_AUTO_START || set NSSM_RC=1
+if not "%NSSM_RC%"=="0" goto config_failed
 "%NSSM%" start VLMP
+if errorlevel 1 goto start_failed
 echo.
 echo VLMP service installed and started.
 echo   Web UI:  http://localhost:8080
 echo   Config:  %DATA%\vlmp.env   (template: "%VLMP_HOME%vlmp.env.example"; restart the service after edits)
 echo   Logs:    %DATA%\logs
+exit /b 0
+
+:config_failed
+echo ERROR: NSSM rejected one or more service settings -- removing the
+echo half-configured service so a retry starts clean.
+"%NSSM%" remove VLMP confirm
+pause
+exit /b 1
+
+:start_failed
+echo ERROR: the service was installed but did not start.
+echo Inspect:  "%NSSM%" status VLMP
+echo Logs:     %DATA%\logs\err.log
+pause
+exit /b 1

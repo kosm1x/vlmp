@@ -84,7 +84,9 @@ done
 
 echo "==> Portable Node.js (latest v$NODE_MAJOR win-x64, checksum-verified)"
 SHAS=$(curl -fsSL "https://nodejs.org/dist/latest-v$NODE_MAJOR.x/SHASUMS256.txt")
-NODE_ZIP_NAME=$(echo "$SHAS" | grep -oE "node-v$NODE_MAJOR[0-9.]*-win-x64\.zip" | head -1)
+# The `|| true` matters under `set -e`: a no-match grep otherwise kills the
+# script AT this assignment and the friendly diagnostic below never prints.
+NODE_ZIP_NAME=$(echo "$SHAS" | { grep -oE "node-v$NODE_MAJOR[0-9.]*-win-x64\.zip" || true; } | head -1)
 NODE_SHA=$(echo "$SHAS" | awk -v f="$NODE_ZIP_NAME" '$2 == f { print $1 }')
 [ -n "$NODE_ZIP_NAME" ] && [ -n "$NODE_SHA" ] || { echo "could not resolve Node win-x64 zip from SHASUMS"; exit 1; }
 NODE_ZIP="$CACHE/$NODE_ZIP_NAME"
@@ -95,7 +97,9 @@ fi
 mkdir -p "$STAGE/node"
 unzip -p "$NODE_ZIP" "*/node.exe" >"$STAGE/node/node.exe"
 unzip -p "$NODE_ZIP" "*/LICENSE" >"$STAGE/node/LICENSE"
-file "$STAGE/node/node.exe" | grep -q "PE32+" || { echo "extracted node.exe is not a Windows PE binary"; exit 1; }
+# Arch-qualified like the sibling checks above — a bare PE32+ grep accepts an
+# Aarch64 binary, and node.exe is the one binary that executes on the user's box.
+file "$STAGE/node/node.exe" | grep -q "PE32+.*x86-64" || { echo "extracted node.exe is missing or not a Windows x86-64 PE binary"; exit 1; }
 
 echo "==> NSSM $NSSM_VERSION (service helper)"
 NSSM_ZIP="$CACHE/nssm-$NSSM_VERSION.zip"
@@ -118,5 +122,8 @@ echo "==> Done"
 ls -lh "$EXE"
 # Record the digest next to the artifact instead of only printing it, so the
 # value published on the release page can be diffed against a rebuild.
-sha256sum "$EXE" | tee "$EXE.sha256"
+# Hashed from inside $OUT so the file names the BARE artifact: an absolute
+# path would leak the builder's checkout dir, break `sha256sum -c` for every
+# downloader, and make rebuilds from different directories byte-differ.
+(cd "$OUT" && sha256sum "$(basename "$EXE")" | tee "$(basename "$EXE").sha256")
 echo "built from: $GIT_DESC"
