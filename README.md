@@ -180,7 +180,7 @@ GET /api/info
 ```json
 {
   "name": "My VLMP",
-  "version": "0.1.9.5",
+  "version": "0.1.9.6",
   "publicUrl": "https://vlmp.example.com",
   "fingerprint": "vlmp-a3f2b1",
   "capabilities": ["hls", "subtitles", "playlists", "federation"]
@@ -227,6 +227,7 @@ The full module map and REST API reference live in the source tree under [`serve
 
 ### Shipped in v0.1.x
 
+- v0.1.9.6 — Startup failures exit non-zero; ffmpeg 7.1 (transcode pacing now applies); no signalling of reaped PIDs
 - v0.1.9.5 — CI hang made diagnosable: bounded test step, logs survive the failure
 - v0.1.9.4 — Auto-fallback direct-play → transcode + sub-360p fix
 - v0.1.9.3 — Re-probe null-codec files on first play
