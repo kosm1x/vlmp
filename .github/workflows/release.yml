@@ -105,8 +105,11 @@ jobs:
     steps:
       # Actions are pinned to commit SHAs, not mutable major tags: this job holds
       # `packages: write`, so a retagged upstream action could push an arbitrary
-      # image to every user. Dependabot (.github/dependabot.yml) keeps the SHAs
-      # current and surfaces major bumps as reviewable PRs.
+      # image to every user. Automated version updates were removed on 2026-07-27
+      # (they produced 8 open PRs, several of them majors against a release path
+      # that had only just started working). Dependabot SECURITY updates are
+      # enabled at the repository level and still open PRs for known CVEs; these
+      # SHAs are now refreshed by hand, deliberately, one at a time.
       # fetch-depth: 0 for the full tag list — the newest-tag check below needs it.
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
         with:
@@ -242,8 +245,8 @@ jobs:
           # NOT `sbom: true`. That shorthand lets BuildKit resolve its default
           # scanner image by mutable tag, which would smuggle an unpinned upstream
           # into the one job holding `packages: write` — the exact thing the
-          # SHA-pinning policy above exists to prevent, and one Dependabot does not
-          # track. Pin the generator by digest instead. Refresh it manually when
+          # SHA-pinning policy above exists to prevent, and one no automated
+          # update tracks. Pin the generator by digest instead. Refresh it manually when
           # bumping syft; a stale scanner only means an older SBOM format.
           attests: |
             type=sbom,generator=docker/buildkit-syft-scanner:stable-1@sha256:79e7b013cbec16bbb436f312819a49a4a57752b2270c1a9332ae1a10fcc82a68

@@ -34,7 +34,8 @@ jobs:
     timeout-minutes: 15
     steps:
       # Actions are pinned to commit SHAs so a retagged upstream can't change what
-      # runs here. Dependabot (.github/dependabot.yml) keeps them current.
+      # runs here. Refreshed by hand since 2026-07-27 — automated version updates
+      # were removed; repository-level Dependabot security updates still cover CVEs.
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
 
       - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
