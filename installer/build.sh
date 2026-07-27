@@ -10,17 +10,12 @@ STAGE="$INST/staging/app"
 CACHE="$INST/cache"
 OUT="$INST/dist"
 
-# Pinned payloads. Node major and its module ABI move together (Node 22 = 127);
-# bump both when moving to a new Node line, and re-check that better-sqlite3
-# publishes a prebuilt for that ABI.
+# Pinned payloads. NODE_MAJOR selects the portable runtime that ships inside the
+# installer. There is no longer an ABI to keep in step with it: both native
+# bindings are N-API, so a Node major bump does not need new binaries.
 NODE_MAJOR=22
-NODE_ABI=127
 NSSM_VERSION=2.24
 NSSM_SHA256=727d1e42275c605e0f04aba98095c38a8e1e46def453cdffce42869428aa6743
-# better-sqlite3 prebuilt pin — a native binary shipped to every Windows user
-# must not ride on an unverified GitHub asset. Bump version + hash together.
-BS3_PIN_VERSION=12.6.2
-BS3_SHA256=2609fd25d59c4c16b43758c1fb2b4afa653925e04941cadae5be28f2d6cd2dc8
 
 VERSION=$(node -p "require('$ROOT/package.json').version")
 BS3_VERSION=$(node -p "require('$ROOT/node_modules/better-sqlite3/package.json').version")
@@ -44,18 +39,23 @@ cp "$ROOT/package-lock.json" "$STAGE/"
 (cd "$STAGE" && npm ci --omit=dev --ignore-scripts --no-audit --no-fund >/dev/null)
 rm -rf "$STAGE/node_modules/.bin" "$STAGE/package-lock.json"
 
-echo "==> better-sqlite3 $BS3_VERSION win32-x64 prebuilt (node ABI $NODE_ABI)"
-[ "$BS3_VERSION" = "$BS3_PIN_VERSION" ] ||
-  { echo "better-sqlite3 is now $BS3_VERSION but the prebuilt pin is $BS3_PIN_VERSION — update BS3_PIN_VERSION + BS3_SHA256"; exit 1; }
-BS3_TGZ="$CACHE/better-sqlite3-v$BS3_VERSION-node-v$NODE_ABI-win32-x64.tar.gz"
-[ -f "$BS3_TGZ" ] || curl -fsSL -o "$BS3_TGZ" \
-  "https://github.com/WiseLibs/better-sqlite3/releases/download/v$BS3_VERSION/better-sqlite3-v$BS3_VERSION-node-v$NODE_ABI-win32-x64.tar.gz"
-echo "$BS3_SHA256  $BS3_TGZ" | sha256sum -c --quiet
-mkdir -p "$STAGE/node_modules/better-sqlite3/build/Release"
-tar -xzf "$BS3_TGZ" -C "$STAGE/node_modules/better-sqlite3" # ships build/Release/better_sqlite3.node
-file "$STAGE/node_modules/better-sqlite3/build/Release/better_sqlite3.node" | grep -q "PE32+" ||
-  { echo "better-sqlite3 prebuilt is not a Windows PE binary"; exit 1; }
-rm -rf "$STAGE/node_modules/better-sqlite3/deps" # sqlite source, build-time only
+echo "==> better-sqlite3 $BS3_VERSION win32-x64 prebuild (bundled in the npm package)"
+# v13 changed how this binding ships. v12 fetched a per-ABI tarball from GitHub
+# releases (`prebuild-install || node-gyp rebuild`), which is why this step used
+# to pin a version and a SHA256 by hand — a GitHub asset is not integrity-checked
+# by npm, so it needed its own control. v13 bundles a prebuild for every platform
+# inside the npm tarball and resolves it ahead of any node-gyp output, so:
+#   * integrity now rides on package-lock.json's sha512, checked by `npm ci`
+#     above — stronger than a hand-copied hash, and it cannot go stale
+#   * the binding is N-API, so it survives a Node major bump
+# Nothing is downloaded here any more; the staged `npm ci` already placed it.
+# Same shape as the bcrypt prune below: keep our platform, drop the other seven
+# (~15MB of darwin/linux/musl/arm binaries that no Windows user can load).
+find "$STAGE/node_modules/better-sqlite3/prebuilds" -mindepth 1 -maxdepth 1 \
+  ! -name 'win32-x64.node' -exec rm -rf {} +
+file "$STAGE/node_modules/better-sqlite3/prebuilds/win32-x64.node" | grep -q "PE32+" ||
+  { echo "better-sqlite3 win32-x64 prebuild missing from npm package"; exit 1; }
+rm -rf "$STAGE/node_modules/better-sqlite3/deps" "$STAGE/node_modules/better-sqlite3/src"
 
 # bcrypt ships every platform's prebuild in the npm package — keep only ours.
 find "$STAGE/node_modules/bcrypt/prebuilds" -mindepth 1 -maxdepth 1 ! -name win32-x64 -exec rm -rf {} +
