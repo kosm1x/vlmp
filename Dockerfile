@@ -9,7 +9,7 @@
 # -readrate_initial_burst, which needs >= 6.1 (see streaming/ffmpeg-caps.ts).
 # On bookworm that flag silently never applies. Both stages move together — the
 # runtime note below explains why they must match.
-FROM node:22-trixie AS builder
+FROM node:26-trixie AS builder
 
 WORKDIR /app
 
@@ -61,7 +61,7 @@ RUN rm -rf \
 # the same Debian release: building against a NEWER glibc than the runtime
 # provides fails at load time, and the pair drifting apart is precisely what the
 # image job in ci.yml exists to catch.
-FROM node:22-trixie-slim AS runtime
+FROM node:26-trixie-slim AS runtime
 
 # FFmpeg + FFprobe (the whole point of the app) and tini for clean PID 1
 RUN apt-get update && apt-get install -y --no-install-recommends \
