@@ -180,7 +180,7 @@ GET /api/info
 ```json
 {
   "name": "My VLMP",
-  "version": "0.1.9.7",
+  "version": "0.1.9.8",
   "publicUrl": "https://vlmp.example.com",
   "fingerprint": "vlmp-a3f2b1",
   "capabilities": ["hls", "subtitles", "playlists", "federation"]
@@ -227,6 +227,7 @@ The full module map and REST API reference live in the source tree under [`serve
 
 ### Shipped in v0.1.x
 
+- v0.1.9.8 — Security: fast-uri 3.1.4 + brace-expansion 5.0.8 (npm audit now clean)
 - v0.1.9.7 — Security: fastify 5.10 / @fastify/static 10 (closes the high-severity advisories); kill guards use real liveness
 - v0.1.9.6 — Startup failures exit non-zero; ffmpeg 7.1 (transcode pacing now applies); no signalling of reaped PIDs
 - v0.1.9.5 — CI hang made diagnosable: bounded test step, logs survive the failure
