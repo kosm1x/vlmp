@@ -58,7 +58,28 @@ jobs:
         run: sudo apt-get update -qq && sudo apt-get install -y --no-install-recommends ffmpeg
       - run: npm ci
       - run: npm run typecheck
-      - run: npm test
+
+      # Same bounded form as ci.yml's Test step, and for the same reason — see
+      # the long comment there for the mechanism. It matters MORE here: `image`
+      # needs this job, so a hang blocks a release outright, and a cancelled job
+      # uploads no logs, leaving nothing to diagnose. That is not hypothetical:
+      # v0.1.9.5's first release attempt (run 30238322446) hung on this exact
+      # unbounded step while the identical suite passed in 41s under the fixed
+      # ci.yml, because the fix landed in one file and not its sibling.
+      - name: Test
+        run: |
+          set -uo pipefail
+          timeout --kill-after=60s 300 npm test >test-output.log 2>&1; rc=$?
+          cat test-output.log
+          pkill -x ffmpeg 2>/dev/null || true
+          pkill -x ffprobe 2>/dev/null || true
+          case $rc in
+            0) ;;
+            124) echo "::error::npm test exceeded 300s and was terminated — the suite normally finishes in ~10s. Check the output above for a hanging-process handle dump." ;;
+            137) echo "::error::npm test ignored SIGTERM and required SIGKILL — a child process is wedged, not merely slow." ;;
+            *) echo "::error::npm test failed with exit $rc" ;;
+          esac
+          exit $rc
 
   image:
     name: Build & push image
