@@ -65,7 +65,7 @@ If that scope fits how you actually watch, welcome.
 ### Docker (recommended)
 
 ```bash
-# 1. Get the repo (the compose file builds the image from source)
+# 1. Get the repo (it carries the compose file)
 git clone https://github.com/kosm1x/vlmp.git
 cd vlmp
 
@@ -73,13 +73,23 @@ cd vlmp
 export VLMP_JWT_SECRET="$(openssl rand -hex 32)"
 #    edit docker-compose.yml: mount your media folder at /media (read-only)
 
-# 3. Up — builds the image on first run
-docker compose up -d --build
+# 3. Up — pulls the published multi-arch image (amd64 + arm64)
+docker compose up -d
 
 # 4. Open http://localhost:8080 — the first account you register becomes admin
 ```
 
-**Updating:** once release images are published to GHCR, `docker compose pull && docker compose up -d` switches you to them. The explicit `pull` matters — a local build is tagged with that same `ghcr.io/kosm1x/vlmp:latest` name, so a plain `up -d` would keep reusing your own image instead.
+Add `--build` only if you want to build from source instead of pulling.
+
+**Where your data lives.** The database, transcode cache and backups go in a Docker **named volume** (`vlmp-data`), not a folder in the repo. That is deliberate: the container runs as an unprivileged user, and a bind mount to a not-yet-existing host path is created root-owned, which used to make the very first `up` fail and restart forever. `docker compose down` keeps the volume — only `down -v` removes it. To back it up:
+
+```bash
+docker run --rm -v vlmp-data:/d -v "$PWD:/out" alpine tar czf /out/vlmp-data.tar.gz -C /d .
+```
+
+If you would rather keep data in a host folder, swap the volume line in `docker-compose.yml` back to `./data:/data` and create it yourself first with `mkdir -p data && sudo chown 1000:1000 data`.
+
+**Updating:** `docker compose pull && docker compose up -d`. The explicit `pull` matters — a local build is tagged with that same `ghcr.io/kosm1x/vlmp:latest` name, so a plain `up -d` would keep reusing your own image instead.
 
 **Pinning a version.** VLMP uses a 4-part `MAJOR.MINOR.PATCH.BUILD` scheme ([why](CONTRIBUTING.md#versioning)). Each release publishes its own exact tags and advances the shorter ones, so you choose how much drift you accept. **How many dot-parts a tag has tells you whether it moves:**
 
@@ -95,7 +105,7 @@ For a fully immutable pin use `v0.1.9.4` or the four-part `0.1.9.4`. Note the ov
 
 Pointers only ever move forward, and pre-releases (`-rc.N`) never take one.
 
-**Verifying a release image.** Once release images are published to GHCR they will carry a SLSA provenance attestation and an SBOM, so you won't have to take the tag's word for what you're running:
+**Verifying a release image.** Release images carry a SLSA provenance attestation and an SBOM, so you don't have to take the tag's word for what you're running:
 
 ```bash
 # Which commit and workflow built it, and what's inside

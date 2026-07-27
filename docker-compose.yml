@@ -38,8 +38,31 @@ services:
       # data directory at /data, and pointing the app elsewhere would silently
       # write into the container's ephemeral layer. Change the volume instead.
     volumes:
-      # Persistent state: SQLite db, transcode cache, backups
-      - ./data:/data
+      # Persistent state: SQLite db, transcode cache, backups.
+      #
+      # A NAMED VOLUME, not `./data`. The container runs as `node` (uid 1000),
+      # and a bind mount to a host path that does not exist yet gets created by
+      # the daemon as root:root — so the very first `docker compose up` on a
+      # fresh clone failed `mkdir /data/transcode` with EACCES and restarted
+      # forever. `data/` is gitignored, so the fresh clone is the normal case,
+      # which made this the documented quick start's default outcome.
+      #
+      # A named volume is initialised from the image, inheriting the Dockerfile's
+      # `chown -R node:node /data`, so it is writable with no host-side setup.
+      # Verified: bind mount → RestartCount 7 and climbing; named volume →
+      # healthy, 0 restarts, /data owned by 1000:1000.
+      #
+      # Your data is still yours and still on your disk:
+      #   inspect   docker volume inspect vlmp-data
+      #   back up   docker run --rm -v vlmp-data:/d -v "$PWD:/out" alpine \
+      #               tar czf /out/vlmp-data.tar.gz -C /d .
+      #   restore   docker run --rm -v vlmp-data:/d -v "$PWD:/in" alpine \
+      #               tar xzf /in/vlmp-data.tar.gz -C /d
+      #
+      # Prefer a host directory anyway? Replace this line with `- ./data:/data`
+      # and create it yourself first, owned by uid 1000:
+      #   mkdir -p data && sudo chown 1000:1000 data
+      - vlmp-data:/data
       # Your media library — READ ONLY. Point the left side at your files.
       # Add one line per library root; match the paths you register in the UI.
       - /path/to/your/media:/media:ro
@@ -58,6 +81,12 @@ services:
       options:
         max-size: "10m"
         max-file: "3"
+
+volumes:
+  # Declared with no options so Docker manages it. `docker compose down` keeps
+  # it; only `down -v` deletes it, so a routine stop or upgrade cannot lose your
+  # library database.
+  vlmp-data:
 
 # When you register library folders in the VLMP admin UI, use the CONTAINER
 # paths (e.g. /media/movies), not the host paths.
