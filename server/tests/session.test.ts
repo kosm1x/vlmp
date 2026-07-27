@@ -1,4 +1,8 @@
-import { describe, it, expect, afterEach } from "vitest";
+import { describe, it, expect, afterEach, beforeEach } from "vitest";
+import { mkdtempSync, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import type { TranscodeJob } from "../src/streaming/transcoder.js";
 import {
   createSession,
   getSession,
@@ -82,5 +86,61 @@ describe("stream sessions", () => {
     createSession(config, 2, "/b.mp4", "2", [], true);
     destroyAllSessions();
     expect(getSessionCount()).toBe(0);
+  });
+});
+
+describe("teardown never signals a dead child", () => {
+  // `ChildProcess.killed` means "a signal was sent", not "the process is
+  // alive" — it stays false for a child that exited on its own. Calling kill()
+  // then targets a reaped PID, which the kernel may have recycled, so the
+  // signal lands on an unrelated process. In CI the recycled PID was the test
+  // runner: `npm test` died ~1s in with exit 137.
+  const fakeJob = (exited: boolean, onKill: () => void) =>
+    ({
+      exited,
+      lastAccessed: Date.now(),
+      outputDir: join(dir, "720p"),
+      process: {
+        killed: false,
+        kill: () => {
+          onKill();
+          return true;
+        },
+      },
+    }) as unknown as TranscodeJob;
+
+  let dir: string;
+  beforeEach(() => {
+    dir = mkdtempSync(join(tmpdir(), "vlmp-session-"));
+  });
+  afterEach(() => {
+    rmSync(dir, { recursive: true, force: true });
+  });
+
+  it("does not signal a job that already exited", () => {
+    const s = createSession(config, 1, "/m.mp4", "1", [], false)!;
+    let kills = 0;
+    s.jobs.set(
+      "720p",
+      fakeJob(true, () => kills++),
+    );
+    destroySession(s.id);
+    expect(
+      kills,
+      "signalling an exited child targets a PID the kernel may have reassigned",
+    ).toBe(0);
+  });
+
+  it("still signals a job that is genuinely running", () => {
+    // The other half: the guard must not turn teardown into a no-op, or
+    // real encoders leak.
+    const s = createSession(config, 1, "/m.mp4", "1", [], false)!;
+    let kills = 0;
+    s.jobs.set(
+      "720p",
+      fakeJob(false, () => kills++),
+    );
+    destroySession(s.id);
+    expect(kills, "a live encoder must still be torn down").toBe(1);
   });
 });
