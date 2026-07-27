@@ -21,10 +21,16 @@ jobs:
   test:
     name: Typecheck & test (Node 22)
     runs-on: ubuntu-latest
-    # The suite runs in ~1 min. This is a hang guard, not a budget: the tests
-    # spawn real ffmpeg/ffprobe, so a wedged child process can leave the job
-    # running to the 6h default while reporting "pending" — observed once on
-    # 2026-07-25. Fail in 15 so it's obvious and the runner is released.
+    # Backstop only — the Test step below bounds itself at 300s, so in a healthy
+    # world this never fires. Kept because a step-level guard cannot cover a hang
+    # in setup-node or apt.
+    #
+    # Do NOT read a 20-minute job here as "the 15-minute guard fired late": it
+    # fires exactly on time, then GitHub allows a 5-minute cancellation grace
+    # before hard-killing. Two untouched hangs on 2026-07-25 (runs 30162027944
+    # and 30164977441, different branches) each ran 20m01s to the second — 15:00
+    # + 5:00 — which is the signature of a process that ignores the runner's
+    # termination signal, not of a late timer.
     timeout-minutes: 15
     steps:
       # Actions are pinned to commit SHAs so a retagged upstream can't change what
@@ -47,8 +53,42 @@ jobs:
       - name: Typecheck
         run: npm run typecheck
 
+      # Bounded and redirected on purpose. Three runs on 2026-07-25 hung here and
+      # produced ZERO evidence, because a job that ends `cancelled` uploads no
+      # logs at all (verified: `gh run view --log` returns BlobNotFound for both
+      # a run I force-cancelled and one I never touched). Relying on
+      # `timeout-minutes` therefore guarantees the one outcome we cannot debug.
+      #
+      # Two separate mechanisms are needed, and neither substitutes for the other:
+      #
+      #  1. `timeout` makes the STEP fail (exit 124/137) instead of the JOB being
+      #     cancelled, so the logs — including any hanging-process dump from
+      #     vitest.config.ts — actually upload.
+      #  2. The redirect to a file is what lets the step finish at all. The step
+      #     stays alive while ANY descendant holds its stdout pipe, so a wedged
+      #     ffmpeg outliving node keeps the runner waiting even though the test
+      #     process is gone. Sending output to a file breaks that inheritance;
+      #     `timeout` alone does not (verified locally on coreutils 9.4: a
+      #     grandchild that ignores SIGTERM survives, and timeout still exits 124
+      #     because its direct child died, so --kill-after never reaches it).
+      #
+      # 300s against a ~10s suite: wide enough that a slow runner is never the
+      # cause, narrow enough to fail well inside the 15-minute backstop.
       - name: Test
-        run: npm test
+        run: |
+          set -uo pipefail
+          timeout --kill-after=60s 300 npm test >test-output.log 2>&1; rc=$?
+          cat test-output.log
+          # Exact-name match: -x cannot match this script the way `pkill -f` would.
+          pkill -x ffmpeg 2>/dev/null || true
+          pkill -x ffprobe 2>/dev/null || true
+          case $rc in
+            0) ;;
+            124) echo "::error::npm test exceeded 300s and was terminated — the suite normally finishes in ~10s. Check the output above for a hanging-process handle dump." ;;
+            137) echo "::error::npm test ignored SIGTERM and required SIGKILL — a child process is wedged, not merely slow." ;;
+            *) echo "::error::npm test failed with exit $rc" ;;
+          esac
+          exit $rc
 
   # Gates the ARTIFACT, not just the source. `npm test` never builds the image, so
   # without this a change that breaks the container merges green and only fails on
