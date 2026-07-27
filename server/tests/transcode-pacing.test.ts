@@ -14,6 +14,7 @@ import {
 } from "../src/streaming/ffmpeg-caps.js";
 import {
   startTranscode,
+  isProcessAlive,
   SEGMENT_SECONDS,
 } from "../src/streaming/transcoder.js";
 import {
@@ -74,7 +75,14 @@ describe("startTranscode pacing args", () => {
 
   function argsOf(job: ReturnType<typeof startTranscode>): string[] {
     const args = job.process.spawnargs;
-    job.process.kill("SIGKILL");
+    // Guarded because these jobs run on cfgDead, whose binary does not exist:
+    // the spawn fails with ENOENT, so by the time we get here the child is
+    // already gone and `process.killed` is still false. An unguarded
+    // kill("SIGKILL") therefore signals a PID the kernel has reaped and may have
+    // reassigned — which is exactly what killed CI: the recycled PID was the
+    // test runner, so `npm test` died ~1s in with exit 137, and the surviving
+    // evidence was a "spawn failed: kill EPERM" per test.
+    if (isProcessAlive(job.process)) job.process.kill("SIGKILL");
     return args;
   }
 
