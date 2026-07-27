@@ -5,10 +5,18 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
 import Fastify, { type FastifyInstance } from "fastify";
 import Database from "better-sqlite3";
-import { mkdtempSync, rmSync, writeFileSync, chmodSync } from "node:fs";
+import {
+  mkdtempSync,
+  mkdirSync,
+  rmSync,
+  writeFileSync,
+  chmodSync,
+  symlinkSync,
+} from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { initSchema } from "../src/db/schema.js";
+import { discoverMedia } from "../src/scanner/discover.js";
 import { resetInterruptedScans } from "../src/media/library.js";
 import { registerLibraryRoutes } from "../src/routes/library.js";
 import { probeFile } from "../src/scanner/probe.js";
@@ -159,6 +167,59 @@ describe("scan route — background + claim", () => {
     });
     expect(res.statusCode).toBe(404);
   });
+});
+
+describe("discoverMedia — symlinks, cycles, extensions", () => {
+  let root: string;
+  let external: string;
+
+  beforeEach(() => {
+    root = mkdtempSync(join(tmpdir(), "vlmp-discover-"));
+    external = mkdtempSync(join(tmpdir(), "vlmp-external-"));
+  });
+
+  afterEach(() => {
+    rmSync(root, { recursive: true, force: true });
+    rmSync(external, { recursive: true, force: true });
+  });
+
+  it("finds AVCHD containers (.m2ts/.mts)", async () => {
+    writeFileSync(join(root, "camcorder.m2ts"), "x");
+    writeFileSync(join(root, "clip.mts"), "x");
+    const found = await discoverMedia(root);
+    expect(found.map((f) => f.path).sort()).toEqual([
+      join(root, "camcorder.m2ts"),
+      join(root, "clip.mts"),
+    ]);
+  });
+
+  // Dirent reflects lstat, so symlinks are neither isFile() nor
+  // isDirectory() — before the fix they were silently invisible.
+  it.skipIf(process.platform === "win32")(
+    "follows symlinked files and directories, terminating on cycles",
+    async () => {
+      writeFileSync(join(root, "plain.mkv"), "x");
+      mkdirSync(join(root, "sub"));
+      writeFileSync(join(root, "sub", "inner.mkv"), "x");
+      // Symlinked file inside the tree.
+      symlinkSync(join(root, "sub", "inner.mkv"), join(root, "alias.mkv"));
+      // Symlinked directory pointing OUTSIDE the tree.
+      writeFileSync(join(external, "ext.mp4"), "x");
+      symlinkSync(external, join(root, "extdir"));
+      // A cycle back to the root — must terminate, not recurse forever.
+      symlinkSync(root, join(root, "loop"));
+      // A broken link — skipped, not fatal.
+      symlinkSync(join(root, "gone.mkv"), join(root, "broken.mkv"));
+
+      const found = await discoverMedia(root);
+      expect(found.map((f) => f.path).sort()).toEqual([
+        join(root, "alias.mkv"),
+        join(root, "extdir", "ext.mp4"),
+        join(root, "plain.mkv"),
+        join(root, "sub", "inner.mkv"),
+      ]);
+    },
+  );
 });
 
 describe("ffprobe timeout", () => {

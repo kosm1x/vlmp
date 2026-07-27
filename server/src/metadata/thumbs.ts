@@ -1,4 +1,5 @@
 import { spawn } from "node:child_process";
+import { createHash } from "node:crypto";
 import { isProcessAlive } from "../process-liveness.js";
 import {
   existsSync,
@@ -7,6 +8,7 @@ import {
   statSync,
   rmSync,
 } from "node:fs";
+import { readdir, unlink } from "node:fs/promises";
 import { join } from "node:path";
 import type Database from "better-sqlite3";
 import type { Config } from "../config.js";
@@ -23,15 +25,48 @@ function thumbDir(config: Config): string {
   return join(config.dataDir, "thumbs");
 }
 
-export function thumbFile(config: Config, mediaId: number): string {
-  return join(thumbDir(config), `${mediaId}.jpg`);
+// Thumbs are keyed by the media FILE's path, never the row id: media_items.id
+// is a plain rowid (no AUTOINCREMENT), so SQLite hands a deleted row's id to
+// the next insert — an id-keyed cache re-attached a deleted category's frames
+// to whatever new media inherited the id. A path key cannot dangle across
+// rows, and re-adding the same folder later reuses its thumbs for free.
+function thumbKey(mediaFilePath: string): string {
+  return createHash("sha256").update(mediaFilePath).digest("hex").slice(0, 16);
+}
+
+export function thumbFile(config: Config, mediaFilePath: string): string {
+  return join(thumbDir(config), `${thumbKey(mediaFilePath)}.jpg`);
 }
 
 // A media file ffmpeg can't grab a frame from (corrupt, audio-only) would
 // otherwise re-run ffmpeg on every browse render. The marker makes failure
 // cheap; deleting the thumbs dir retries everything.
-function failMarker(config: Config, mediaId: number): string {
-  return join(thumbDir(config), `${mediaId}.fail`);
+function failMarker(config: Config, mediaFilePath: string): string {
+  return join(thumbDir(config), `${thumbKey(mediaFilePath)}.fail`);
+}
+
+// Boot-time hygiene: pre-path-keying thumbs were `<rowid>.jpg`/`<rowid>.fail`.
+// Under path keying they are unreachable — but they are exactly the poisoned
+// artifacts of the id-reuse bug, so delete them rather than carry them
+// forever. Best-effort; returns how many files went.
+export async function sweepLegacyThumbs(config: Config): Promise<number> {
+  let names: string[];
+  try {
+    names = await readdir(thumbDir(config));
+  } catch {
+    return 0; // no thumbs dir yet
+  }
+  let removed = 0;
+  for (const name of names) {
+    if (!/^\d+\.(jpg|fail)$/.test(name)) continue;
+    try {
+      await unlink(join(thumbDir(config), name));
+      removed++;
+    } catch {
+      /* best-effort */
+    }
+  }
+  return removed;
 }
 
 // Concurrent browse renders request the same thumb in parallel — dedupe so
@@ -76,17 +111,20 @@ async function generate(
   mediaId: number,
   config: Config,
 ): Promise<string | null> {
-  const out = thumbFile(config, mediaId);
-  // Marker FIRST: on Windows a killed ffmpeg can hold the truncated output
-  // file open (EBUSY, undeletable for a moment) — the marker must win over
-  // any leftover partial, or a broken image gets served forever.
-  if (existsSync(failMarker(config, mediaId))) return null;
-  if (fileHasContent(out)) return out;
-
+  // Row FIRST: the cache key is derived from the row's file_path, so the
+  // lookup must precede any disk check (this ordering is also what makes a
+  // recycled row id incapable of serving another file's cached frame).
   const row = db
     .prepare("SELECT file_path, duration FROM media_items WHERE id = ?")
     .get(mediaId) as { file_path: string; duration: number | null } | undefined;
   if (!row) return null;
+
+  const out = thumbFile(config, row.file_path);
+  // Marker before content: on Windows a killed ffmpeg can hold the truncated
+  // output file open (EBUSY, undeletable for a moment) — the marker must win
+  // over any leftover partial, or a broken image gets served forever.
+  if (existsSync(failMarker(config, row.file_path))) return null;
+  if (fileHasContent(out)) return out;
 
   mkdirSync(thumbDir(config), { recursive: true });
 
@@ -126,7 +164,7 @@ async function generate(
        marker below outranks the leftover partial, so serving stays correct */
   }
   try {
-    writeFileSync(failMarker(config, mediaId), "");
+    writeFileSync(failMarker(config, row.file_path), "");
   } catch {
     /* marker is best-effort */
   }

@@ -35,6 +35,12 @@ CREATE TABLE IF NOT EXISTS media_items (
   file_size INTEGER,
   title TEXT NOT NULL,
   sort_title TEXT,
+  -- Display grouping for non-episode rows: the top-level subfolder the file
+  -- lives in (a course, a collection) and its numbered-prefix sequence. NULL
+  -- for files at the library root and for linked episodes (those group via
+  -- tv_shows). Lets the category page mirror the on-disk folder structure.
+  group_title TEXT,
+  group_position INTEGER,
   year INTEGER,
   description TEXT,
   genres TEXT,
@@ -269,6 +275,10 @@ export function initSchema(db: Database.Database): void {
   // the play route re-probe them once to backfill both (and fix direct play).
   addColumnIfMissing(db, "media_items", "pix_fmt", "TEXT");
   addColumnIfMissing(db, "media_items", "probed_at", "INTEGER");
+  // Folder-grouping display columns; existing rows are backfilled by the
+  // rescan reclassification pass, so NULL defaults are correct here.
+  addColumnIfMissing(db, "media_items", "group_title", "TEXT");
+  addColumnIfMissing(db, "media_items", "group_position", "INTEGER");
   db.exec(INDEXES);
   db.exec(
     `CREATE TABLE IF NOT EXISTS schema_version (version INTEGER NOT NULL);`,

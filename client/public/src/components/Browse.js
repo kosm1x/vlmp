@@ -5,6 +5,7 @@ import { get, getUserRole, getUserId } from "../api.js";
 import { fetchCategories } from "../categories.js";
 import { MediaCard } from "./MediaCard.js";
 import { ShowCard } from "./ShowCard.js";
+import { invalidateThumbCache } from "./ThumbImg.js";
 const html = htm.bind(h);
 
 // Home shelves that aren't categories. Category shelves are appended from
@@ -56,6 +57,9 @@ const fullCache = new Map();
 const cacheKey = (slug) => `${getUserId()}:${slug}`;
 export function invalidateLibraryCache() {
   fullCache.clear();
+  // Media ids can be recycled across a folder delete + rescan, so stale
+  // id-keyed thumbs must die together with the library cache.
+  invalidateThumbCache();
 }
 
 function showSortTitle(title) {
@@ -117,6 +121,37 @@ async function loadCategoryShelf(slug, limit) {
     ),
   ]);
   return { shows: shows || [], items: (browse && browse.items) || [] };
+}
+
+// Split a category's items into folder groups (course/collection subfolders,
+// carried by the server as group_title/group_position) and loose items. A
+// group needs at least 2 members — a per-movie folder is not a section.
+// Group key includes the folder id so same-named subfolders in different
+// library folders stay separate sections.
+function partitionGroups(items) {
+  const byKey = new Map();
+  for (const i of items) {
+    if (!i.group_title) continue;
+    const key = `${i.library_folder_id ?? 0}:${i.group_title}`;
+    if (!byKey.has(key)) byKey.set(key, []);
+    byKey.get(key).push(i);
+  }
+  const groups = [];
+  const groupedIds = new Set();
+  for (const [key, members] of byKey) {
+    if (members.length < 2) continue;
+    members.sort(
+      (a, b) =>
+        (a.group_position ?? Infinity) - (b.group_position ?? Infinity) ||
+        (a.sort_title || "").localeCompare(b.sort_title || ""),
+    );
+    groups.push({ key, title: members[0].group_title, items: members });
+    for (const m of members) groupedIds.add(m.id);
+  }
+  groups.sort((a, b) =>
+    a.title.localeCompare(b.title, undefined, { sensitivity: "base" }),
+  );
+  return { groups, loose: items.filter((i) => !groupedIds.has(i.id)) };
 }
 
 function sortCards(cards, mode) {
@@ -182,10 +217,16 @@ function CategoryGrid({ category }) {
       });
   }, [category]);
 
-  const cards = useMemo(
-    () => (data ? sortCards(data.cards, sortMode) : []),
+  // Folder sections come first, mirroring the on-disk structure in their
+  // numbered sequence; only the remaining loose cards obey the sort selector.
+  const { groups, loose } = useMemo(
+    () => (data ? partitionGroups(data.items) : { groups: [], loose: [] }),
+    [data],
+  );
+  const looseCards = useMemo(
+    () => (data ? sortCards(toCards(data.shows, loose), sortMode) : []),
     // shuffleSeed forces a fresh shuffle when Random is (re)selected.
-    [data, sortMode, shuffleSeed],
+    [data, loose, sortMode, shuffleSeed],
   );
 
   function changeSort(mode) {
@@ -215,6 +256,7 @@ function CategoryGrid({ category }) {
   const showCount = data ? data.shows.length : 0;
   const total = data ? data.cards.length : 0;
   const empty = !loading && data && total === 0;
+  const folderCount = groups.length;
   return html`<div class="browse">
     <div class="category-header">
       <div class="category-heading">
@@ -222,14 +264,18 @@ function CategoryGrid({ category }) {
         ${
           data &&
           html`<span class="category-count"
-            >${showCount > 0 ? `${showCount} series · ` : ""}${total}
+            >${showCount > 0 ? `${showCount} series · ` : ""}${
+              folderCount > 0
+                ? `${folderCount} ${folderCount === 1 ? "folder" : "folders"} · `
+                : ""
+            }${total}
             ${total === 1 ? "title" : "titles"}</span
           >`
         }
       </div>
       ${
         data &&
-        total > 1 &&
+        looseCards.length > 1 &&
         html`<div class="category-sort">
           <label class="sort-label"
             >Sort
@@ -266,8 +312,24 @@ function CategoryGrid({ category }) {
       html`<div class="empty"><h2>Nothing in ${label} yet</h2></div>`
     }
     ${loading && !data && html`<div class="loading">Loading...</div>`}
+    ${groups.map(
+      (g) =>
+        html`<div class="category-group" key=${g.key}>
+          <h2>${g.title}</h2>
+          <div class="category-grid">
+            ${g.items.map(
+            (i) => html`<${MediaCard} key=${"item-" + i.id} item=${i} />`,
+          )}
+          </div>
+        </div>`,
+    )}
+    ${
+      groups.length > 0 &&
+      looseCards.length > 0 &&
+      html`<h2 class="category-loose-heading">Other</h2>`
+    }
     <div class="category-grid">
-      ${cards.map((c) =>
+      ${looseCards.map((c) =>
         c.kind === "show"
           ? html`<${ShowCard} key=${c.key} show=${c.show} />`
           : html`<${MediaCard} key=${c.key} item=${c.item} />`,

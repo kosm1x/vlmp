@@ -162,6 +162,151 @@ describe("series bundling — a real episode evicts a synthetic squatter", () =>
   });
 });
 
+describe("folder grouping — movie-kind subfolders keep their sequence", () => {
+  let root: string;
+
+  beforeEach(() => {
+    root = mkdtempSync(join(tmpdir(), "vlmp-groups-"));
+    // Two course folders plus a loose root file. In "B Course" the numbered
+    // order (Zeta before Apple) contradicts the alphabetical order — the one
+    // case a flat title sort gets wrong.
+    mkdirSync(join(root, "A Course"));
+    writeFileSync(join(root, "A Course", "01 - Intro.mp4"), "x");
+    writeFileSync(join(root, "A Course", "02 - Deep Dive.mp4"), "x");
+    mkdirSync(join(root, "B Course"));
+    writeFileSync(join(root, "B Course", "01 - Zeta.mp4"), "x");
+    writeFileSync(join(root, "B Course", "02 - Apple.mp4"), "x");
+    writeFileSync(join(root, "Standalone Lecture.mp4"), "x");
+  });
+
+  afterEach(() => rmSync(root, { recursive: true, force: true }));
+
+  it("persists group_title/group_position and orders groups in sequence", async () => {
+    const folder = addLibraryFolder(db, root, "education");
+    await scanLibraryFolder(db, folder, scanConfig);
+
+    const rows = browseLibrary(db, {
+      category: "education",
+      includeHidden: true,
+      all: true,
+    }).items;
+    expect(rows.map((r) => r.title)).toEqual([
+      "Intro", // A Course, position 1
+      "Deep Dive", // A Course, position 2
+      "Zeta", // B Course, position 1 — beats alphabetical
+      "Apple", // B Course, position 2
+      "Standalone Lecture",
+    ]);
+    expect(rows[0].group_title).toBe("A Course");
+    expect(rows[0].group_position).toBe(1);
+    expect(rows[3].group_title).toBe("B Course");
+    expect(rows[3].group_position).toBe(2);
+    expect(rows[4].group_title).toBeNull();
+  });
+
+  it("groups in a user-created movie-kind category too (not just 'education')", async () => {
+    db.prepare(
+      "INSERT INTO categories (slug, label, kind) VALUES ('cursos', 'Cursos', 'movie')",
+    ).run();
+    const folder = addLibraryFolder(db, root, "cursos");
+    await scanLibraryFolder(db, folder, scanConfig);
+    const rows = browseLibrary(db, {
+      category: "cursos",
+      includeHidden: true,
+      all: true,
+    }).items;
+    const aCourse = rows.filter((r) => r.group_title === "A Course");
+    expect(aCourse).toHaveLength(2);
+    expect(aCourse.map((r) => r.group_position)).toEqual([1, 2]);
+  });
+
+  it("rescan heals rows scanned before the group columns existed", async () => {
+    const folder = addLibraryFolder(db, root, "education");
+    await scanLibraryFolder(db, folder, scanConfig);
+    // Simulate a pre-group-columns row.
+    db.prepare(
+      "UPDATE media_items SET group_title = NULL, group_position = NULL",
+    ).run();
+    await scanLibraryFolder(db, folder, scanConfig);
+    const healed = db
+      .prepare(
+        "SELECT COUNT(*) c FROM media_items WHERE group_title IS NOT NULL",
+      )
+      .get() as { c: number };
+    expect(healed.c).toBe(4); // both courses; the loose root file stays NULL
+  });
+
+  it("linked episodes never carry group columns", async () => {
+    const tvRoot = mkdtempSync(join(tmpdir(), "vlmp-tvgroups-"));
+    try {
+      mkdirSync(join(tvRoot, "Show", "Season 1"), { recursive: true });
+      writeFileSync(join(tvRoot, "Show", "Season 1", "S01E01 - A.mkv"), "x");
+      const folder = addLibraryFolder(db, tvRoot, "tv");
+      await scanLibraryFolder(db, folder, scanConfig);
+      const row = db
+        .prepare(
+          "SELECT group_title, group_position FROM media_items WHERE type = 'episode'",
+        )
+        .get() as { group_title: string | null; group_position: number | null };
+      expect(row.group_title).toBeNull();
+      expect(row.group_position).toBeNull();
+    } finally {
+      rmSync(tvRoot, { recursive: true, force: true });
+    }
+  });
+});
+
+describe("short-sample filter exempts sequenced content", () => {
+  it("a short numbered lesson survives rescan; a short loose file is pruned", async () => {
+    const root = mkdtempSync(join(tmpdir(), "vlmp-short-"));
+    try {
+      mkdirSync(join(root, "Course"));
+      writeFileSync(join(root, "Course", "01 - Intro.mp4"), "x");
+      writeFileSync(join(root, "sample.mp4"), "x");
+      const folder = addLibraryFolder(db, root, "education");
+      // First scan: probe fails, duration unknown, both rows land.
+      await scanLibraryFolder(db, folder, scanConfig);
+      db.prepare("UPDATE media_items SET duration = 60").run();
+      // Rescan with known short durations: the sequenced lesson is content,
+      // the loose short file is a sample.
+      const result = await scanLibraryFolder(db, folder, scanConfig);
+      expect(result.skippedShort).toBe(1);
+      const titles = db
+        .prepare("SELECT title FROM media_items ORDER BY title")
+        .all() as { title: string }[];
+      expect(titles).toEqual([{ title: "Intro" }]);
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
+  });
+});
+
+describe("season 0 (specials) stays season 0", () => {
+  it("S00E01 lands in season 0 and does not collide with S01E01", async () => {
+    const root = mkdtempSync(join(tmpdir(), "vlmp-specials-"));
+    try {
+      mkdirSync(join(root, "Show"));
+      writeFileSync(join(root, "Show", "Show S00E01 - Special.mkv"), "x");
+      writeFileSync(join(root, "Show", "Show S01E01 - Pilot.mkv"), "x");
+      const folder = addLibraryFolder(db, root, "tv");
+      await scanLibraryFolder(db, folder, scanConfig);
+      const seasons = db
+        .prepare(
+          "SELECT s.season_number, COUNT(e.id) c FROM seasons s JOIN episodes e ON e.season_id = s.id GROUP BY s.id ORDER BY s.season_number",
+        )
+        .all() as { season_number: number; c: number }[];
+      // The || 1 coercion used to fold the special into season 1, where it
+      // lost the UNIQUE(season_id, episode_number) race and vanished.
+      expect(seasons).toEqual([
+        { season_number: 0, c: 1 },
+        { season_number: 1, c: 1 },
+      ]);
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
+  });
+});
+
 describe("browse — full load and per-user liked flag", () => {
   let root: string;
   let folder: LibraryFolder;

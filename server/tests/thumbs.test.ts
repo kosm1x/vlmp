@@ -15,7 +15,11 @@ import {
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { initSchema } from "../src/db/schema.js";
-import { getOrCreateThumb, thumbFile } from "../src/metadata/thumbs.js";
+import {
+  getOrCreateThumb,
+  sweepLegacyThumbs,
+  thumbFile,
+} from "../src/metadata/thumbs.js";
 import { registerMetadataRoutes } from "../src/routes/metadata.js";
 import { issueToken } from "../src/auth/jwt.js";
 import { loadConfig, type Config } from "../src/config.js";
@@ -81,7 +85,7 @@ describe.skipIf(process.platform === "win32")("getOrCreateThumb", () => {
     cfg.ffmpegPath = stubFFmpeg(OK_STUB);
     const id = addMedia(1);
     const first = await getOrCreateThumb(db, id, cfg);
-    expect(first).toBe(thumbFile(cfg, id));
+    expect(first).toBe(thumbFile(cfg, "/m/a.mp4"));
     expect(readFileSync(first!, "utf-8")).toBe("JPGDATA");
     expect(runCount()).toBe(1);
     await getOrCreateThumb(db, id, cfg);
@@ -147,6 +151,59 @@ printf 'JPGDATA' > "$out"
     ]);
     expect(a).toBe(b);
     expect(runCount()).toBe(1);
+  });
+
+  // The id-reuse regression: media_items.id is a plain rowid, so a deleted
+  // row's id gets handed to the next insert. An id-keyed thumb cache served
+  // the DELETED file's frame for the new media; path keying must not.
+  it("a recycled media id never serves the previous file's thumbnail", async () => {
+    cfg.ffmpegPath = stubFFmpeg(OK_STUB);
+    const id = addMedia(1);
+    const first = await getOrCreateThumb(db, id, cfg);
+    expect(first).toBe(thumbFile(cfg, "/m/a.mp4"));
+    expect(runCount()).toBe(1);
+
+    // Delete the row and re-insert a DIFFERENT file under the same id.
+    db.prepare("DELETE FROM media_items WHERE id = ?").run(id);
+    db.prepare(
+      "INSERT INTO media_items (id, type, file_path, title, sort_title, duration) VALUES (?, 'movie', '/m/b.mp4', 'B', 'b', 600)",
+    ).run(id);
+
+    const second = await getOrCreateThumb(db, id, cfg);
+    expect(second).toBe(thumbFile(cfg, "/m/b.mp4"));
+    expect(second).not.toBe(first); // the old frame is unreachable
+    expect(runCount()).toBe(2); // a fresh grab ran for the new file
+  });
+
+  it("a recycled id does not inherit the previous file's fail marker", async () => {
+    cfg.ffmpegPath = stubFFmpeg(FAIL_STUB);
+    const id = addMedia(1);
+    expect(await getOrCreateThumb(db, id, cfg)).toBe(null); // writes a.mp4's marker
+    db.prepare("DELETE FROM media_items WHERE id = ?").run(id);
+    db.prepare(
+      "INSERT INTO media_items (id, type, file_path, title, sort_title, duration) VALUES (?, 'movie', '/m/b.mp4', 'B', 'b', 600)",
+    ).run(id);
+    cfg.ffmpegPath = stubFFmpeg(OK_STUB);
+    const second = await getOrCreateThumb(db, id, cfg);
+    expect(second).toBe(thumbFile(cfg, "/m/b.mp4")); // not poisoned into a 404
+  });
+});
+
+describe("sweepLegacyThumbs", () => {
+  it("removes id-keyed files, keeps path-keyed ones, survives a missing dir", async () => {
+    const thumbs = join(dataDir, "thumbs");
+    // Missing dir: nothing to sweep, no throw.
+    expect(await sweepLegacyThumbs(cfg)).toBe(0);
+    const { mkdirSync } = await import("node:fs");
+    mkdirSync(thumbs, { recursive: true });
+    writeFileSync(join(thumbs, "42.jpg"), "old");
+    writeFileSync(join(thumbs, "7.fail"), "");
+    const kept = thumbFile(cfg, "/m/a.mp4");
+    writeFileSync(kept, "new");
+    expect(await sweepLegacyThumbs(cfg)).toBe(2);
+    expect(existsSync(join(thumbs, "42.jpg"))).toBe(false);
+    expect(existsSync(join(thumbs, "7.fail"))).toBe(false);
+    expect(existsSync(kept)).toBe(true);
   });
 });
 
@@ -222,5 +279,30 @@ describe.skipIf(process.platform === "win32")("GET /media/:id/thumb", () => {
       headers: { authorization: `Bearer ${userToken}` },
     });
     expect(res.statusCode).toBe(404);
+  });
+
+  // The URL is id-addressed and ids get recycled, so browsers must
+  // revalidate: no-cache + ETag, with a 304 when the bytes are unchanged.
+  it("forces revalidation and answers 304 to a matching If-None-Match", async () => {
+    const id = addMedia(1);
+    const first = await app.inject({
+      method: "GET",
+      url: `/media/${id}/thumb`,
+      headers: { authorization: `Bearer ${userToken}` },
+    });
+    expect(first.statusCode).toBe(200);
+    expect(first.headers["cache-control"]).toBe("private, no-cache");
+    const etag = first.headers.etag as string;
+    expect(etag).toBeTruthy();
+    const second = await app.inject({
+      method: "GET",
+      url: `/media/${id}/thumb`,
+      headers: {
+        authorization: `Bearer ${userToken}`,
+        "if-none-match": etag,
+      },
+    });
+    expect(second.statusCode).toBe(304);
+    expect(second.body).toBe("");
   });
 });

@@ -72,21 +72,24 @@ export function classifyMedia(
 
   const { title, year } = parseTitleYear(fileName, {
     stripEpisode: true,
+    // Title stripping stays education-only: on movies a leading number is
+    // usually the TITLE ("300.2006.720P.BRRIP" must not lose "300.").
     stripNumbered: category.slug === "education",
   });
   return {
     type: typeForSlug(category.slug),
     title,
     year,
-    // Education keeps its course-folder name as a display grouping (legacy
-    // behavior; these rows are type "education", never linked as episodes).
-    showTitle:
-      category.slug === "education" && dirParts.length > 0 ? dirParts[0] : null,
+    // Any subfolder in a movie-kind category is a display grouping (course,
+    // collection). These rows are never linked as episodes — the scanner
+    // persists showTitle/episodeNumber as group_title/group_position instead,
+    // so the category page can render the on-disk folder structure in
+    // sequence rather than one flat alphabetical grid.
+    showTitle: dirParts.length > 0 ? dirParts[0] : null,
     showYear: null,
     showRootRel: null,
     seasonNumber: null,
-    episodeNumber:
-      category.slug === "education" ? numberedPrefix(fileName) : null,
+    episodeNumber: numberedPrefix(fileName),
   };
 }
 

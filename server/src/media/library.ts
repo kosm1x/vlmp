@@ -37,6 +37,8 @@ export interface MediaItem {
   file_path: string;
   file_size: number | null;
   title: string;
+  group_title: string | null;
+  group_position: number | null;
   year: number | null;
   description: string | null;
   duration: number | null;
@@ -172,7 +174,12 @@ export async function scanLibraryFolder(
   db: Database.Database,
   folder: LibraryFolder,
   config: Config,
-): Promise<{ added: number; pruned: number; skippedShort: number }> {
+): Promise<{
+  added: number;
+  pruned: number;
+  skippedShort: number;
+  errored: number;
+}> {
   db.prepare("UPDATE library_folders SET scan_status = ? WHERE id = ?").run(
     "scanning",
     folder.id,
@@ -180,6 +187,7 @@ export async function scanLibraryFolder(
   let added = 0;
   let pruned = 0;
   let skippedShort = 0;
+  let errored = 0;
   try {
     const files = await discoverMedia(folder.path);
     // Folder rows can only reference existing categories (creation is
@@ -189,128 +197,165 @@ export async function scanLibraryFolder(
       kind: "movie" as const,
     };
     const insertMedia = db.prepare(
-      "INSERT OR IGNORE INTO media_items (library_folder_id, type, file_path, file_size, title, sort_title, year, codec_video, codec_audio, pix_fmt, probed_at, resolution_width, resolution_height, bitrate, duration, audio_tracks) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+      "INSERT OR IGNORE INTO media_items (library_folder_id, type, file_path, file_size, title, sort_title, group_title, group_position, year, codec_video, codec_audio, pix_fmt, probed_at, resolution_width, resolution_height, bitrate, duration, audio_tracks) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
     );
     for (const file of files) {
-      const classified = classifyMedia(file.path, folder.path, category);
-      const existing = db
-        .prepare(
-          "SELECT id, type, title, year, duration FROM media_items WHERE file_path = ?",
-        )
-        .get(file.path) as
-        | {
-            id: number;
-            type: string;
-            title: string;
-            year: number | null;
-            duration: number | null;
+      // Per-file isolation: one bad file (IO error, constraint surprise) must
+      // not abort the scan and silently drop every file after it in the walk.
+      try {
+        const classified = classifyMedia(file.path, folder.path, category);
+        // A sequenced file — a series episode or a numbered course/collection
+        // entry — is deliberate content, never a stray "sample.mkv". The
+        // short-sample filter only exists for unsequenced release junk.
+        const sequenced =
+          classified.type === "episode" || classified.episodeNumber != null;
+        // Folder-grouping display columns, non-episode rows only: an
+        // episode's showTitle names its show (it groups via tv_shows).
+        const groupTitle =
+          classified.type === "episode" ? null : classified.showTitle;
+        const groupPosition =
+          classified.type === "episode" ? null : classified.episodeNumber;
+        const existing = db
+          .prepare(
+            "SELECT id, type, title, year, duration, group_title, group_position FROM media_items WHERE file_path = ?",
+          )
+          .get(file.path) as
+          | {
+              id: number;
+              type: string;
+              title: string;
+              year: number | null;
+              duration: number | null;
+              group_title: string | null;
+              group_position: number | null;
+            }
+          | undefined;
+        if (existing) {
+          // Backfill: rows stored before the short-file filter existed get
+          // pruned on rescan (FK cascades clean episodes/progress/playlists;
+          // orphaned shows are swept below). Row deletion on scan is exactly
+          // what VLMP_EMPTY_TRASH_ON_SCAN opts out of — honor it here too.
+          if (
+            config.emptyTrashOnScan &&
+            !sequenced &&
+            isShortSample(file.isVideo, existing.duration, config)
+          ) {
+            db.prepare("DELETE FROM media_items WHERE id = ?").run(existing.id);
+            skippedShort++;
+            continue;
           }
-        | undefined;
-      if (existing) {
-        // Backfill: rows stored before the short-file filter existed get
-        // pruned on rescan (FK cascades clean episodes/progress/playlists;
-        // orphaned shows are swept below). Row deletion on scan is exactly
-        // what VLMP_EMPTY_TRASH_ON_SCAN opts out of — honor it here too.
+          // Backfill: classification rules changed (or the folder's category
+          // did) — re-derive from the source path and migrate the stored row.
+          // Metadata enrichment is safe: TMDb writes description/poster/genres,
+          // never title/year, so re-deriving those clobbers nothing.
+          reclassifyExistingItem(
+            db,
+            existing,
+            file.path,
+            classified,
+            folder,
+            groupTitle,
+            groupPosition,
+          );
+          continue;
+        }
+        let probe = null;
+        try {
+          probe = await probeFile(file.path, config);
+        } catch {
+          /* skip */
+        }
+        // Short unsequenced video = sample/trailer: don't insert, don't
+        // TMDb-match, don't extract subtitles.
         if (
-          config.emptyTrashOnScan &&
-          isShortSample(file.isVideo, existing.duration, config)
+          !sequenced &&
+          isShortSample(file.isVideo, probe?.duration, config)
         ) {
-          db.prepare("DELETE FROM media_items WHERE id = ?").run(existing.id);
           skippedShort++;
           continue;
         }
-        // Backfill: classification rules changed (or the folder's category
-        // did) — re-derive from the source path and migrate the stored row.
-        // Metadata enrichment is safe: TMDb writes description/poster/genres,
-        // never title/year, so re-deriving those clobbers nothing.
-        reclassifyExistingItem(db, existing, file.path, classified, folder);
-        continue;
-      }
-      let probe = null;
-      try {
-        probe = await probeFile(file.path, config);
-      } catch {
-        /* skip */
-      }
-      // Short video = sample/trailer: don't insert, don't TMDb-match, don't
-      // extract subtitles.
-      if (isShortSample(file.isVideo, probe?.duration, config)) {
-        skippedShort++;
-        continue;
-      }
-      const sortTitle = classified.title
-        .replace(/^(?:the|a|an)\s+/i, "")
-        .toLowerCase();
-      insertMedia.run(
-        folder.id,
-        classified.type,
-        file.path,
-        file.size,
-        classified.title,
-        sortTitle,
-        classified.year,
-        probe?.codecVideo || null,
-        probe?.codecAudio || null,
-        probe?.pixFmt || null,
-        // Only a successful probe counts as "probed"; a failed one leaves
-        // probed_at NULL so the play route re-probes later.
-        probe ? Math.floor(Date.now() / 1000) : null,
-        probe?.width || null,
-        probe?.height || null,
-        probe?.bitrate || null,
-        probe?.duration || null,
-        probe?.audioTracks ? JSON.stringify(probe.audioTracks) : null,
-      );
-      added++;
+        const sortTitle = classified.title
+          .replace(/^(?:the|a|an)\s+/i, "")
+          .toLowerCase();
+        const info = insertMedia.run(
+          folder.id,
+          classified.type,
+          file.path,
+          file.size,
+          classified.title,
+          sortTitle,
+          groupTitle,
+          groupPosition,
+          classified.year,
+          probe?.codecVideo || null,
+          probe?.codecAudio || null,
+          probe?.pixFmt || null,
+          // Only a successful probe counts as "probed"; a failed one leaves
+          // probed_at NULL so the play route re-probes later.
+          probe ? Math.floor(Date.now() / 1000) : null,
+          probe?.width || null,
+          probe?.height || null,
+          probe?.bitrate || null,
+          probe?.duration || null,
+          probe?.audioTracks ? JSON.stringify(probe.audioTracks) : null,
+        );
+        // OR IGNORE can swallow the insert — only count rows actually written.
+        if (info.changes > 0) added++;
 
-      // Get the inserted media ID for post-insert hooks
-      const inserted = db
-        .prepare("SELECT id FROM media_items WHERE file_path = ?")
-        .get(file.path) as { id: number } | undefined;
+        // Get the inserted media ID for post-insert hooks
+        const inserted = db
+          .prepare("SELECT id FROM media_items WHERE file_path = ?")
+          .get(file.path) as { id: number } | undefined;
 
-      if (inserted) {
-        // Auto-match metadata from TMDb (non-fatal)
-        if (config.tmdbApiKey) {
-          try {
-            await matchAndApplyMetadata(db, inserted.id, config);
-          } catch {
-            /* metadata fetch failure is non-fatal */
+        if (inserted) {
+          // Auto-match metadata from TMDb (non-fatal)
+          if (config.tmdbApiKey) {
+            try {
+              await matchAndApplyMetadata(db, inserted.id, config);
+            } catch {
+              /* metadata fetch failure is non-fatal */
+            }
+          }
+
+          // Extract subtitles if present (non-fatal). Off by default: extraction
+          // demuxes the ENTIRE file, so a full-library scan pins the media drive
+          // at 100% read for hours. Playback-time extraction covers the normal
+          // path; VLMP_EXTRACT_SUBS_ON_SCAN=true opts back in.
+          if (
+            config.extractSubsOnScan &&
+            probe?.subtitleTracks &&
+            probe.subtitleTracks.length > 0
+          ) {
+            try {
+              const extracted = await extractSubtitles(
+                file.path,
+                inserted.id,
+                probe.subtitleTracks,
+                config,
+              );
+              persistSubtitles(db, inserted.id, extracted);
+            } catch {
+              /* subtitle extraction failure is non-fatal */
+            }
           }
         }
 
-        // Extract subtitles if present (non-fatal). Off by default: extraction
-        // demuxes the ENTIRE file, so a full-library scan pins the media drive
-        // at 100% read for hours. Playback-time extraction covers the normal
-        // path; VLMP_EXTRACT_SUBS_ON_SCAN=true opts back in.
-        if (
-          config.extractSubsOnScan &&
-          probe?.subtitleTracks &&
-          probe.subtitleTracks.length > 0
-        ) {
-          try {
-            const extracted = await extractSubtitles(
-              file.path,
-              inserted.id,
-              probe.subtitleTracks,
-              config,
-            );
-            persistSubtitles(db, inserted.id, extracted);
-          } catch {
-            /* subtitle extraction failure is non-fatal */
+        if (classified.type === "episode" && classified.showTitle) {
+          const showId = linkEpisodeToShow(db, file.path, folder, classified);
+          // Match show metadata from TMDb (non-fatal)
+          if (showId && config.tmdbApiKey) {
+            try {
+              await matchAndApplyShowMetadata(db, showId, config);
+            } catch {
+              /* non-fatal */
+            }
           }
         }
-      }
-
-      if (classified.type === "episode" && classified.showTitle) {
-        const showId = linkEpisodeToShow(db, file.path, folder, classified);
-        // Match show metadata from TMDb (non-fatal)
-        if (showId && config.tmdbApiKey) {
-          try {
-            await matchAndApplyShowMetadata(db, showId, config);
-          } catch {
-            /* non-fatal */
-          }
-        }
+      } catch (err) {
+        errored++;
+        console.warn(
+          `[scan] failed to process ${file.path}: ${err instanceof Error ? err.message : err}`,
+        );
       }
     }
     // Empty trash: drop rows for files removed/renamed since the last scan.
@@ -321,6 +366,10 @@ export async function scanLibraryFolder(
     if (skippedShort > 0)
       console.log(
         `[scan] ignored ${skippedShort} video${skippedShort === 1 ? "" : "s"} shorter than ${config.minDurationSeconds}s (samples) in folder ${folder.id}`,
+      );
+    if (errored > 0)
+      console.warn(
+        `[scan] ${errored} file${errored === 1 ? "" : "s"} failed to process in folder ${folder.id} (see warnings above)`,
       );
     const now = Math.floor(Date.now() / 1000);
     db.prepare(
@@ -333,7 +382,7 @@ export async function scanLibraryFolder(
     );
     throw err;
   }
-  return { added, pruned, skippedShort };
+  return { added, pruned, skippedShort, errored };
 }
 
 // Empty trash: remove media_items in this folder whose file no longer exists
@@ -408,7 +457,10 @@ function linkEpisodeToShow(
       showFolderPath(folder, classified),
     ) as { id: number } | undefined;
   if (!show) return null;
-  const seasonNum = classified.seasonNumber || 1;
+  // ?? not ||: season 0 is real (specials). Coercing it to 1 made every
+  // S00Exx collide with the real S01Exx on UNIQUE(season_id, episode_number)
+  // and silently vanish from the show page.
+  const seasonNum = classified.seasonNumber ?? 1;
   db.prepare(
     "INSERT OR IGNORE INTO seasons (show_id, season_number) VALUES (?, ?)",
   ).run(show.id, seasonNum);
@@ -475,6 +527,13 @@ function linkEpisodeToShow(
       console.warn(
         `[scan] episode link failed for media ${media.id}: ${err instanceof Error ? err.message : err}`,
       );
+    // The duplicate case stays linked-to-the-first by design, but never
+    // silently: the losing file is absent from the show page, and the admin
+    // deserves a trace of why.
+    else
+      console.warn(
+        `[scan] S${seasonNum}E${episodeNumber} already linked in show ${show.id} — keeping the first copy, ${filePath} stays unlinked (visible in the flat grid only)`,
+      );
   }
   return show.id;
 }
@@ -484,30 +543,44 @@ function linkEpisodeToShow(
 // every rescan; a no-op when nothing changed.
 function reclassifyExistingItem(
   db: Database.Database,
-  existing: { id: number; type: string; title: string; year: number | null },
+  existing: {
+    id: number;
+    type: string;
+    title: string;
+    year: number | null;
+    group_title: string | null;
+    group_position: number | null;
+  },
   filePath: string,
   classified: ClassifiedMedia,
   folder: LibraryFolder,
+  groupTitle: string | null,
+  groupPosition: number | null,
 ): void {
   // Any parse difference (not just a type flip) gets re-derived: classifier
-  // fixes must heal rows stored by older versions. TMDb never writes
-  // title/year (only description/poster/genres/rating), so this clobbers
-  // nothing enrichment owns.
+  // fixes must heal rows stored by older versions (including rows scanned
+  // before the group columns existed). TMDb never writes title/year (only
+  // description/poster/genres/rating), so this clobbers nothing enrichment
+  // owns.
   if (
     existing.type !== classified.type ||
     existing.title !== classified.title ||
-    existing.year !== classified.year
+    existing.year !== classified.year ||
+    existing.group_title !== groupTitle ||
+    existing.group_position !== groupPosition
   ) {
     const sortTitle = classified.title
       .replace(/^(?:the|a|an)\s+/i, "")
       .toLowerCase();
     db.prepare(
-      "UPDATE media_items SET type = ?, title = ?, sort_title = ?, year = ?, updated_at = unixepoch() WHERE id = ?",
+      "UPDATE media_items SET type = ?, title = ?, sort_title = ?, year = ?, group_title = ?, group_position = ?, updated_at = unixepoch() WHERE id = ?",
     ).run(
       classified.type,
       classified.title,
       sortTitle,
       classified.year,
+      groupTitle,
+      groupPosition,
       existing.id,
     );
   }
@@ -594,9 +667,16 @@ export function browseLibrary(
   const limitParams = options.all
     ? []
     : [options.limit || 50, options.offset || 0];
+  // Grouped rows (a course/collection subfolder) must come out clustered and
+  // in their numbered sequence, interleaved alphabetically with loose titles;
+  // within a group, unnumbered files fall back to title order. Search results
+  // stay a plain title sort — group interleaving would look random there.
+  const orderBy = options.search
+    ? "ORDER BY mi.sort_title ASC"
+    : "ORDER BY COALESCE(mi.group_title, mi.sort_title) COLLATE NOCASE ASC, mi.group_title IS NULL, mi.group_position IS NULL, mi.group_position ASC, mi.sort_title ASC";
   const items = db
     .prepare(
-      `SELECT mi.*, ${likedCol} FROM media_items mi LEFT JOIN library_folders lf ON mi.library_folder_id = lf.id ${where} ORDER BY mi.sort_title ASC ${limitClause}`,
+      `SELECT mi.*, ${likedCol} FROM media_items mi LEFT JOIN library_folders lf ON mi.library_folder_id = lf.id ${where} ${orderBy} ${limitClause}`,
     )
     .all(...selectParams, ...params, ...limitParams) as MediaItem[];
   return { items, total: total.count };

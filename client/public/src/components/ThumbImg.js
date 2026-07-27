@@ -14,6 +14,15 @@ const html = htm.bind(h);
 const cache = new Map();
 const CACHE_MAX = 300;
 
+// Media ids get RECYCLED server-side after a folder delete (SQLite rowid
+// reuse), so an id-keyed blob — or a remembered 404 — can belong to a media
+// item that no longer exists. Callers that invalidate the library cache must
+// drop these too, or a new item renders a deleted item's frame.
+export function invalidateThumbCache() {
+  for (const url of cache.values()) if (url) URL.revokeObjectURL(url);
+  cache.clear();
+}
+
 function remember(mediaId, value) {
   if (cache.size >= CACHE_MAX) {
     const [oldestId, oldest] = cache.entries().next().value;

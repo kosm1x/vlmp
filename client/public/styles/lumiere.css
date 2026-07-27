@@ -494,13 +494,18 @@ body {
 .media-row {
   margin-bottom: 2.5rem;
 }
-.media-row h2 {
+.media-row h2,
+.category-group h2,
+.category-loose-heading {
   font-family: var(--lum-font-display);
   font-weight: 400;
   font-size: 1.05rem;
   color: var(--lum-text-primary);
   letter-spacing: 0.02em;
   margin-bottom: 0.9rem;
+}
+.category-group {
+  margin-bottom: 2.5rem;
 }
 .media-row-items::-webkit-scrollbar {
   height: 3px;
@@ -552,7 +557,11 @@ body {
   background: #000;
 }
 .player-header {
-  background: linear-gradient(180deg, rgba(12, 11, 10, 0.85) 0%, transparent 100%);
+  background: linear-gradient(
+    180deg,
+    rgba(12, 11, 10, 0.85) 0%,
+    transparent 100%
+  );
 }
 .player-back {
   color: var(--lum-text-primary);
@@ -569,7 +578,11 @@ body {
   letter-spacing: 0.02em;
 }
 .player-controls {
-  background: linear-gradient(0deg, rgba(12, 11, 10, 0.85) 0%, transparent 100%);
+  background: linear-gradient(
+    0deg,
+    rgba(12, 11, 10, 0.85) 0%,
+    transparent 100%
+  );
 }
 .player-seek {
   background: rgba(237, 232, 224, 0.2);

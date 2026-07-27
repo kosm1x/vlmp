@@ -1279,6 +1279,17 @@ body {
   grid-template-columns: repeat(auto-fill, minmax(160px, 1fr));
   gap: 1rem 0.75rem;
 }
+/* Folder sections on the category page (group_title): same heading treatment
+   as the home shelves. */
+.category-group {
+  margin-bottom: 2rem;
+}
+.category-group h2,
+.category-loose-heading {
+  font-size: 1.1rem;
+  font-weight: 500;
+  margin-bottom: 0.75rem;
+}
 .category-grid .media-card {
   width: auto;
 }

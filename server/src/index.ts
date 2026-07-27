@@ -12,6 +12,7 @@ import { initHwEncoder } from "./streaming/hw-encoders.js";
 import { getDatabase, closeDatabase } from "./db/index.js";
 import { initSchema } from "./db/schema.js";
 import { resetInterruptedScans } from "./media/library.js";
+import { sweepLegacyThumbs } from "./metadata/thumbs.js";
 import { startCleanupLoop } from "./db/cleanup.js";
 import { startBackupLoop } from "./db/backup.js";
 import { registerAuthRoutes } from "./routes/auth.js";
@@ -74,6 +75,13 @@ try {
 }
 mkdirSync(config.transcodeTmpDir, { recursive: true });
 mkdirSync(config.subtitleDir, { recursive: true });
+// Delete id-keyed thumbnails from before path keying — they are the poisoned
+// artifacts of the rowid-reuse bug. Async and best-effort; boot never waits.
+sweepLegacyThumbs(config)
+  .then((n) => {
+    if (n > 0) console.log(`[boot] removed ${n} legacy id-keyed thumbnails`);
+  })
+  .catch(() => {});
 
 // Preflight: fresh Windows installs commonly lack FFmpeg on PATH. Non-fatal —
 // direct play still works — but say so loudly instead of failing at first scan.

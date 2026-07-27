@@ -15,6 +15,7 @@ import { classifyMedia } from "../scanner/classify.js";
 import { getCategoryBySlug } from "../media/categories.js";
 import { isMediaFolderVisible } from "../media/library.js";
 import { createReadStream } from "node:fs";
+import { stat } from "node:fs/promises";
 
 let metadataScanState = {
   inProgress: false,
@@ -44,10 +45,23 @@ export function registerMetadataRoutes(
         return reply.code(404).send({ error: "Not found" });
       const path = await getOrCreateThumb(db, id, config);
       if (!path) return reply.code(404).send({ error: "No thumbnail" });
+      // The URL is /media/<id>/thumb and row ids get RECYCLED after a folder
+      // delete (rowid reuse), so the same URL can legitimately point at a
+      // different file later. A blind max-age let browsers serve a deleted
+      // category's image for a day — force revalidation instead; unchanged
+      // thumbs cost a 304, never a re-download.
+      let etag: string;
+      try {
+        const s = await stat(path);
+        etag = `"${s.size}-${Math.floor(s.mtimeMs)}"`;
+      } catch {
+        return reply.code(404).send({ error: "No thumbnail" });
+      }
+      reply.header("Cache-Control", "private, no-cache");
+      reply.header("ETag", etag);
+      if (request.headers["if-none-match"] === etag)
+        return reply.code(304).send();
       reply.header("Content-Type", "image/jpeg");
-      // private: thumbs sit behind auth; immutable-ish: regenerated only if
-      // the thumbs dir is wiped, so a day of client caching is safe.
-      reply.header("Cache-Control", "private, max-age=86400");
       return reply.send(createReadStream(path));
     },
   );

@@ -1,4 +1,4 @@
-import { readdir, stat } from "node:fs/promises";
+import { readdir, stat, realpath } from "node:fs/promises";
 import { join, extname } from "node:path";
 
 const VIDEO_EXTENSIONS = new Set([
@@ -13,6 +13,8 @@ const VIDEO_EXTENSIONS = new Set([
   ".mpg",
   ".mpeg",
   ".ts",
+  ".m2ts",
+  ".mts",
   ".vob",
   ".3gp",
   ".ogv",
@@ -41,14 +43,24 @@ export async function discoverMedia(
   // An unreadable ROOT is a scan error (typo'd path, unmounted drive), not an
   // empty library; deeper unreadable subdirectories are still skipped quietly.
   await readdir(rootPath);
+  // Cycle guard for symlinked directories: track every real directory
+  // entered so `Show -> ../Show` loops terminate instead of recursing forever.
+  const visited = new Set<string>();
+  try {
+    visited.add(await realpath(rootPath));
+  } catch {
+    /* root exists (readdir above succeeded) — a realpath race just means the
+       guard starts empty */
+  }
   const results: DiscoveredFile[] = [];
-  await walkDir(rootPath, results);
+  await walkDir(rootPath, results, visited);
   return results;
 }
 
 async function walkDir(
   dirPath: string,
   results: DiscoveredFile[],
+  visited: Set<string>,
 ): Promise<void> {
   let entries;
   try {
@@ -58,9 +70,32 @@ async function walkDir(
   }
   for (const entry of entries) {
     const fullPath = join(dirPath, entry.name);
-    if (entry.isDirectory()) {
-      await walkDir(fullPath, results);
-    } else if (entry.isFile()) {
+    // Dirent reflects lstat: a symlink is neither isFile() nor isDirectory(),
+    // so symlinked files and symlinked sub-libraries (a normal way to compose
+    // media roots) were silently invisible to the scan. Resolve through the
+    // link; the row keeps the symlink PATH so classification stays relative
+    // to this library's folder structure.
+    let isDir = entry.isDirectory();
+    let isFile = entry.isFile();
+    if (entry.isSymbolicLink()) {
+      try {
+        const target = await stat(fullPath); // stat follows the link
+        isDir = target.isDirectory();
+        isFile = target.isFile();
+      } catch {
+        continue; // broken link
+      }
+    }
+    if (isDir) {
+      try {
+        const real = await realpath(fullPath);
+        if (visited.has(real)) continue;
+        visited.add(real);
+      } catch {
+        continue;
+      }
+      await walkDir(fullPath, results, visited);
+    } else if (isFile) {
       const ext = extname(entry.name).toLowerCase();
       const isVideo = VIDEO_EXTENSIONS.has(ext);
       const isAudio = AUDIO_EXTENSIONS.has(ext);
