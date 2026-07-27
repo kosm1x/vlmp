@@ -135,7 +135,12 @@ jobs:
       # its reads could never hit. Here master pushes populate the default-branch
       # scope and PR runs read from it. Writes are restricted to push events so PRs
       # don't each dump a ~1GB mode=max export into the repo's shared 10GB budget.
+      # Bounded at the STEP so a buildx/registry stall FAILS here with its log
+      # intact. Leaving it to the job-level timeout ends the job `cancelled`,
+      # and a cancelled job uploads no step logs at all (BlobNotFound) — the
+      # exact undebuggable outcome the test job's bounded step exists to avoid.
       - name: Build image
+        timeout-minutes: 15
         uses: docker/build-push-action@10e90e3645eae34f1e60eeb005ba3a3d33f178e8 # v6.19.2
         with:
           context: .
@@ -197,6 +202,18 @@ jobs:
             || { echo "::error::version missing"; exit 1; }
           echo "/api/info contract OK"
 
+      # Into a FILE + artifact, not just the step log: this job's only
+      # diagnostic must survive the cancelled-job case, same reasoning as the
+      # test job's upload above. tee keeps it readable inline on normal runs.
       - name: Container logs
         if: always()
-        run: docker logs vlmp-ci 2>&1 || true
+        run: docker logs vlmp-ci 2>&1 | tee container.log || true
+
+      - name: Upload container logs
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: container-logs-${{ github.job }}-${{ github.run_attempt }}
+          path: container.log
+          if-no-files-found: ignore
+          retention-days: 7
