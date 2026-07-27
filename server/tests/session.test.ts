@@ -2,7 +2,12 @@ import { describe, it, expect, afterEach, beforeEach } from "vitest";
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import type { TranscodeJob } from "../src/streaming/transcoder.js";
+import { spawn } from "node:child_process";
+import { once } from "node:events";
+import {
+  isProcessAlive,
+  type TranscodeJob,
+} from "../src/streaming/transcoder.js";
 import {
   createSession,
   getSession,
@@ -99,7 +104,18 @@ describe("teardown never signals a dead child", () => {
   // in BOTH cases on purpose — that is the whole point: it records that a signal
   // was sent, so it cannot distinguish a running child from a reaped one. Only
   // exitCode does.
-  const fakeJob = (exited: boolean, onKill: () => void) =>
+  //
+  // `exited` and `exitCode` are independent parameters, NOT derived from each
+  // other. Tying them together is what made an earlier version of this fixture
+  // useless: `!job.exited` short-circuited before isProcessAlive was ever
+  // consulted, so the guard could be reverted to `return true` and every test
+  // still passed. The reaped-but-not-yet-reported case (exited false, exitCode
+  // set) is the one that actually exercises the predicate.
+  const fakeJob = (
+    exited: boolean,
+    onKill: () => void,
+    exitCode: number | null = exited ? 0 : null,
+  ) =>
     ({
       exited,
       lastAccessed: Date.now(),
@@ -107,7 +123,7 @@ describe("teardown never signals a dead child", () => {
       process: {
         pid: 424242,
         killed: false,
-        exitCode: exited ? 0 : null,
+        exitCode,
         signalCode: null,
         kill: () => {
           onKill();
@@ -149,5 +165,57 @@ describe("teardown never signals a dead child", () => {
     );
     destroySession(s.id);
     expect(kills, "a live encoder must still be torn down").toBe(1);
+  });
+
+  // The case that actually reaches isProcessAlive. The child has been reaped —
+  // exitCode is set — but the 'exit' event has not run yet, so the app's own
+  // `exited` bookkeeping is still false. This is the real shape of the race that
+  // killed CI, and it is the ONLY fixture here that fails if the predicate is
+  // weakened to `return true`.
+  it("does not signal a reaped child whose exit event has not fired yet", () => {
+    const s = createSession(config, 1, "/m.mp4", "1", [], false)!;
+    let kills = 0;
+    s.jobs.set(
+      "720p",
+      fakeJob(false, () => kills++, 0),
+    );
+    destroySession(s.id);
+    expect(
+      kills,
+      "exitCode is set, so the PID is reaped and may already be reassigned",
+    ).toBe(0);
+  });
+});
+
+describe("isProcessAlive", () => {
+  // Unit-level, against REAL ChildProcess objects rather than a fixture, so the
+  // predicate is pinned to Node's actual behaviour and not to our model of it.
+  it("is false for a spawn that failed", async () => {
+    const cp = spawn("/nonexistent/vlmp-audit-probe", []);
+    await once(cp, "error");
+    expect(isProcessAlive(cp)).toBe(false);
+  });
+
+  it("is true while a child is running, false once it exits", async () => {
+    const cp = spawn("/bin/sleep", ["30"]);
+    await once(cp, "spawn");
+    expect(isProcessAlive(cp), "a running child must be killable").toBe(true);
+    cp.kill("SIGKILL");
+    await once(cp, "exit");
+    expect(isProcessAlive(cp), "a reaped child must not be signalled").toBe(
+      false,
+    );
+  });
+
+  it("stays true immediately after a signal is sent but before exit", async () => {
+    // `killed` flips true here while the process is still alive — the exact
+    // reason it cannot be used as a liveness check.
+    const cp = spawn("/bin/sleep", ["30"]);
+    await once(cp, "spawn");
+    cp.kill("SIGSTOP");
+    expect(cp.killed, "killed records the signal, not the state").toBe(true);
+    expect(isProcessAlive(cp)).toBe(true);
+    cp.kill("SIGKILL");
+    await once(cp, "exit");
   });
 });

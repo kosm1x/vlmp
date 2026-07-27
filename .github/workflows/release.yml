@@ -89,6 +89,20 @@ jobs:
           esac
           exit $rc
 
+      # Belt and braces for the log: `cat` above only helps if the JOB survives
+      # to finish the step, and a cancelled job uploads no step logs at all.
+      # `if: always()` DOES run on cancellation and on the job timeout, so those
+      # are covered. It does NOT cover a runner eviction, which kills the runner
+      # process itself — nothing can upload after that.
+      - name: Upload test output
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: test-output-${{ github.job }}-${{ github.run_attempt }}
+          path: test-output.log
+          if-no-files-found: ignore
+          retention-days: 7
+
   image:
     name: Build & push image
     needs: test

@@ -13,7 +13,7 @@ FROM node:22-trixie AS builder
 
 WORKDIR /app
 
-# No toolchain install here on purpose: node:22-bookworm already ships gcc, g++,
+# No toolchain install here on purpose: node:22-trixie already ships gcc, g++,
 # make and python3 (verified: `apt-get install -s python3 make g++` reports "0
 # newly installed"), so the apt round-trip that used to sit here cost ~2s and
 # ~19MB of package indexes per architecture to install nothing. The toolchain is
@@ -22,10 +22,13 @@ WORKDIR /app
 # Install with dev deps so we can compile TypeScript.
 #
 # Neither native module normally compiles here, but for different reasons:
-#   * better-sqlite3 DOWNLOADS a prebuild matching node 22's ABI (127), via an
-#     install script of `prebuild-install || node-gyp rebuild` — a silent
-#     fallback: if the download ever 404s it compiles instead, adding minutes
-#     (far more under arm64 emulation) with no failure to explain the delay.
+#   * better-sqlite3 v13 SHIPS N-API prebuilds for 8 platforms inside its npm
+#     tarball and `lib/binding.js` resolves those BEFORE any node-gyp output.
+#     (v12 downloaded a per-ABI tarball via `prebuild-install || node-gyp
+#     rebuild`; that model is gone, and with it the silent-404-then-compile
+#     hazard this comment used to warn about.) Its install script is still a
+#     bare `node-gyp rebuild`, so the line below DOES compile a binary — one
+#     the loader then ignores in favour of the bundled prebuild. See F16.
 #   * bcrypt SHIPS N-API prebuilds inside its npm tarball (prebuildify --napi,
 #     install script `node-gyp-build`), so it is not ABI-tagged and never
 #     downloads. A Node major bump does not need a new bcrypt release.
@@ -41,10 +44,11 @@ RUN npm run build
 RUN npm prune --omit=dev
 
 # Drop build inputs the runtime never reads. better-sqlite3 ships the sqlite
-# amalgamation in deps/ plus its C++ sources; bcrypt ships its sources too. At
-# runtime only the compiled .node under build/Release is loaded (via `bindings`).
-# Measured inside the image: node_modules 36MB -> 26MB, better-sqlite3 12MB ->
-# 2.1MB, per architecture.
+# amalgamation in deps/ plus its C++ sources; bcrypt ships its sources too.
+# At runtime better-sqlite3 loads `prebuilds/<platform>-<arch>.node`, NOT the
+# compiled build/Release output — both are present in the image today.
+# Measured inside the shipped 0.1.9.8 image: better-sqlite3 is 17MB, of which
+# ~14.6MB is prebuilds for seven platforms this image can never run. See F16.
 #
 # Left alone deliberately: bcrypt/prebuilds/ carries every platform's binding
 # (~1MB where ~76KB on arm64 / ~85KB on amd64 is used), but pruning it to just

@@ -19,6 +19,7 @@ Server handles transcoding, metadata, subtitles. Client is a thin Preact shell s
 | `server/src/media/categories.ts`            | User-managed categories (slug/kind CRUD, rename, delete guard)       |
 | `server/src/subtitles/opensubtitles.ts`     | OpenSubtitles search/download + SRT→VTT                              |
 | `server/src/scanner/probe.ts`               | FFprobe wrapper                                                      |
+| `server/src/process-liveness.ts`            | `isProcessAlive` — the only safe guard before signalling a child     |
 | `server/src/streaming/transcoder.ts`        | FFmpeg HLS pipeline (paced via -readrate)                            |
 | `server/src/streaming/session.ts`           | Stream session manager + on-demand segment encode                    |
 | `server/src/streaming/playback-decision.ts` | Direct-vs-transcode decision + play-time re-probe of null-codec rows |
@@ -59,7 +60,9 @@ npm run test         # vitest run
 - Config loaded at startup via `loadConfig()`, passed to modules
 - All JSON parsing wrapped in try/catch
 - FFmpeg/FFprobe via child_process.spawn
-- **Never signal a child without `isProcessAlive()`** (`streaming/transcoder.ts`).
+- **Never signal a child without `isProcessAlive()`** (`process-liveness.ts`, a
+  dependency-free module so scanner/metadata/streaming can all use it without
+  import cycles; re-exported from `streaming/transcoder.ts`).
   `ChildProcess.killed` only records that a signal was _sent_, so it is false for
   a reaped child too — killing on `!killed` targets a PID the kernel may have
   reassigned to an unrelated process. This applies in **tests as well**; the

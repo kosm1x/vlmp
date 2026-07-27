@@ -1,4 +1,5 @@
 import { spawn } from "node:child_process";
+import { isProcessAlive } from "../process-liveness.js";
 import type { Config } from "../config.js";
 
 export interface ProbeResult {
@@ -68,7 +69,11 @@ function runFFprobe(
     const timer = setTimeout(() => {
       if (!killed) {
         killed = true;
-        proc.kill("SIGKILL");
+        // isProcessAlive, not the local flag: the timers phase runs before the
+        // poll phase, so a child that exits in the same loop turn as this
+        // deadline has not delivered 'close' yet and its PID may already be
+        // reaped. See streaming/transcoder.ts.
+        if (isProcessAlive(proc)) proc.kill("SIGKILL");
         reject(
           new Error(`ffprobe timed out after ${timeoutMs}ms: ${filePath}`),
         );
@@ -80,7 +85,7 @@ function runFFprobe(
       if (stdout.length > MAX_PROBE_STDOUT && !killed) {
         killed = true;
         clearTimeout(timer);
-        proc.kill("SIGTERM");
+        if (isProcessAlive(proc)) proc.kill("SIGTERM");
         reject(new Error("ffprobe output exceeded 1MB limit"));
       }
     });

@@ -1,4 +1,5 @@
 import { spawn } from "node:child_process";
+import { isProcessAlive } from "../process-liveness.js";
 import {
   existsSync,
   mkdirSync,
@@ -149,7 +150,8 @@ function runFFmpeg(ffmpegPath: string, args: string[]): Promise<boolean> {
     const timer = setTimeout(() => {
       if (!done) {
         done = true;
-        proc.kill("SIGKILL");
+        // Liveness, not the local flag — see streaming/transcoder.ts.
+        if (isProcessAlive(proc)) proc.kill("SIGKILL");
         resolve(false);
       }
     }, GRAB_TIMEOUT_MS);
