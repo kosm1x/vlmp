@@ -31,15 +31,34 @@ import { loadOrGenerateFingerprint } from "./federation/crypto.js";
 import { destroyAllSessions } from "./streaming/session.js";
 import { startHeartbeatLoop } from "./federation/health.js";
 
-// Last-resort guards. This server typically runs without a supervisor, so
-// availability wins over crash-on-unknown-state: known throw sources are
-// handled at their origin; anything reaching here is logged, not fatal.
-process.on("uncaughtException", (err) => {
-  console.error("[fatal] uncaughtException:", err);
-});
-process.on("unhandledRejection", (reason) => {
-  console.error("[fatal] unhandledRejection:", reason);
-});
+// Flipped once the server is actually accepting connections. Everything before
+// that point is boot, and boot failures must be fatal — see the guards below.
+let listening = false;
+
+// Last-resort guards. This server typically runs without a supervisor, so once
+// it is serving, availability wins over crash-on-unknown-state: known throw
+// sources are handled at their origin; anything reaching here is logged, not
+// fatal.
+//
+// That trade only makes sense AFTER the listener exists. During boot there is
+// nothing to keep alive, and staying up is the worst outcome: the handler logs,
+// the event loop drains with no listener registered, and node exits **0** — a
+// clean, intentional stop as far as any supervisor can tell. Docker's
+// `restart: unless-stopped` then loops silently and systemd's
+// `Restart=on-failure` never fires. Verified: an unwritable VLMP_DATA_DIR exits
+// 0 today while binding nothing, which is the mechanism behind the documented
+// compose crash-loop.
+const guard = (label: string) => (err: unknown) => {
+  console.error(`[fatal] ${label}:`, err);
+  if (!listening) {
+    console.error(
+      "[fatal] the above happened during startup, before the server was listening — exiting 1 so supervisors see a failure rather than a clean stop",
+    );
+    process.exit(1);
+  }
+};
+process.on("uncaughtException", guard("uncaughtException"));
+process.on("unhandledRejection", guard("unhandledRejection"));
 
 const config = loadConfig();
 mkdirSync(config.dataDir, { recursive: true });
@@ -231,6 +250,8 @@ process.on("SIGBREAK", shutdown);
 
 try {
   await app.listen({ port: config.port, host: config.host });
+  // Boot is over: from here the guards above go back to log-don't-die.
+  listening = true;
   app.log.info(`VLMP server running on http://${config.host}:${config.port}`);
 } catch (err) {
   app.log.error(err);
