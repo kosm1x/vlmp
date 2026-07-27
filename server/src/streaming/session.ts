@@ -8,6 +8,7 @@ import { disableHwEncoder } from "./hw-encoders.js";
 import {
   startTranscode,
   waitForSegment,
+  isProcessAlive,
   SEGMENT_SECONDS,
   type TranscodeJob,
 } from "./transcoder.js";
@@ -127,7 +128,7 @@ export function startProfileTranscode(
   // that exited on its own, so it is not a liveness check. Signalling an exited
   // child asks the OS to signal a PID that has been reaped and may already
   // belong to something else. See destroySession for the full note.
-  if (existing && !existing.exited && !existing.process.killed)
+  if (existing && !existing.exited && isProcessAlive(existing.process))
     existing.process.kill("SIGTERM");
   // Segment numbers ARE absolute media time (n * SEGMENT_SECONDS): the
   // synthesized VOD playlist has no offset, so the ffmpeg input seek and
@@ -276,7 +277,7 @@ export function destroySession(id: string): void {
     // runner itself, killing `npm test` about a second in with exit 137 and a
     // "[transcode] spawn failed: kill EPERM" alongside it. The sibling guard in
     // cleanupIdleSessions below already checks `exited`; these two did not.
-    if (!job.exited && !job.process.killed) job.process.kill("SIGTERM");
+    if (!job.exited && isProcessAlive(job.process)) job.process.kill("SIGTERM");
   }
   const firstJob = session.jobs.values().next().value;
   if (firstJob) {
@@ -322,7 +323,7 @@ function cleanupIdleSessions(): void {
     for (const job of session.jobs.values()) {
       if (
         !job.exited &&
-        !job.process.killed &&
+        isProcessAlive(job.process) &&
         now - job.lastAccessed > JOB_IDLE_MS
       )
         job.process.kill("SIGKILL");

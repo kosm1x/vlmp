@@ -172,6 +172,23 @@ export function startTranscode(
   return job;
 }
 
+/**
+ * True only when the child genuinely exists and is still running.
+ *
+ * Do NOT use `ChildProcess.killed` for this. It records that a signal was SENT,
+ * so it is false both for a process that is running and for one that exited or
+ * never spawned — signalling on `!killed` therefore targets PIDs the kernel has
+ * already reaped and possibly reassigned, and the signal lands on a stranger.
+ *
+ * Measured after an ENOENT spawn: `pid` undefined, `exitCode` -2,
+ * `signalCode` null, `killed` **false**. All three fields below are needed:
+ * `pid` catches the never-spawned case, `exitCode` the self-exited case, and
+ * `signalCode` the already-signalled case.
+ */
+export function isProcessAlive(cp: ChildProcess): boolean {
+  return cp.pid !== undefined && cp.exitCode === null && cp.signalCode === null;
+}
+
 export function isPlaylistReady(outputDir: string): boolean {
   return existsSync(join(outputDir, "playlist.m3u8"));
 }

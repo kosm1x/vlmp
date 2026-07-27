@@ -95,13 +95,20 @@ describe("teardown never signals a dead child", () => {
   // then targets a reaped PID, which the kernel may have recycled, so the
   // signal lands on an unrelated process. In CI the recycled PID was the test
   // runner: `npm test` died ~1s in with exit 137.
+  // Models the real ChildProcess fields teardown inspects. `killed` stays false
+  // in BOTH cases on purpose — that is the whole point: it records that a signal
+  // was sent, so it cannot distinguish a running child from a reaped one. Only
+  // exitCode does.
   const fakeJob = (exited: boolean, onKill: () => void) =>
     ({
       exited,
       lastAccessed: Date.now(),
       outputDir: join(dir, "720p"),
       process: {
+        pid: 424242,
         killed: false,
+        exitCode: exited ? 0 : null,
+        signalCode: null,
         kill: () => {
           onKill();
           return true;
