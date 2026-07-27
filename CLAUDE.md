@@ -60,6 +60,11 @@ npm run test         # vitest run
 - Config loaded at startup via `loadConfig()`, passed to modules
 - All JSON parsing wrapped in try/catch
 - FFmpeg/FFprobe via child_process.spawn
+- **Every ffmpeg/ffprobe spawn is time-bounded** — timeout + `isProcessAlive`-gated
+  kill, `probe.ts` is the reference shape. The scan pipeline awaits these
+  in-line, so one unbounded child strands a folder at `scan_status='scanning'`
+  forever. The last gap (`subtitles/extract.ts`) was closed in v0.1.9.9; a new
+  spawn site without a bound reopens the class.
 - **Never signal a child without `isProcessAlive()`** (`process-liveness.ts`, a
   dependency-free module so scanner/metadata/streaming can all use it without
   import cycles; re-exported from `streaming/transcoder.ts`).
