@@ -81,20 +81,27 @@ docker compose up -d
 
 Add `--build` only if you want to build from source instead of pulling.
 
-> **⚠ Upgrading from 0.1.9.4 or earlier — read this first.**
-> Those versions bind-mounted `./data`. This one uses a named volume, so a
-> plain `git pull && docker compose up -d` starts the server on **empty
-> storage**: no library, no accounts, no watch history, and a new federation
-> identity. Nothing warns you — the container is healthy, it is just a
-> different disk. Your old files are untouched in `./data`.
+> **⚠ Upgrading from any earlier release — read this first.**
+> **Every** version published so far (up to and including v0.1.9.8) bind-mounted
+> `./data`. This one uses a named volume, so a plain
+> `git pull && docker compose up -d` starts the server on **empty storage**: no
+> library, no accounts, no watch history, and a new federation identity. Nothing
+> warns you — the container is healthy, it is just a different disk. Your old
+> files are untouched in `./data`.
 >
 > Migrate first, with the stack stopped:
 >
 > ```bash
 > docker compose down
-> docker run --rm -v "$PWD/data":/from -v vlmp-data:/to alpine sh -c 'cp -a /from/. /to/'
+> test -f data/vlmp.db || { echo "no ./data/vlmp.db here — nothing to migrate"; exit 1; }
+> docker run --rm -v "$PWD/data":/from -v vlmp-data:/to alpine \
+>   sh -c 'cp -a /from/. /to/ && chown -R 1000:1000 /to'
 > docker compose up -d
 > ```
+>
+> The `chown` is not optional. `cp -a` preserves ownership, and if your `./data`
+> is root-owned — which it is if you ever hit the old first-run crash-loop — it
+> carries that into the volume and the server fails to start all over again.
 >
 > Or keep your current layout: swap the volume line in `docker-compose.yml`
 > back to `./data:/data` and run `sudo chown 1000:1000 data` once.
