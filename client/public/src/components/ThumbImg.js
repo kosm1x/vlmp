@@ -59,7 +59,16 @@ export function ThumbImg({ mediaId, title }) {
       return;
     }
     let alive = true;
+    // cache:"no-cache" = always revalidate, the request-side mirror of the
+    // server's `Cache-Control: private, no-cache`. It is what evicts GHOSTS
+    // left by pre-v0.1.9.9.1 servers: those sent max-age=86400, so a browser
+    // holding such an entry serves a deleted item's image WITHOUT any request
+    // — the fixed server never gets asked. With no-cache the entry is
+    // revalidated (old entries carry no ETag, so they refetch outright);
+    // current entries cost a 304. The in-memory Map above still keeps it to
+    // one network round-trip per media id per session.
     fetch(`/media/${mediaId}/thumb`, {
+      cache: "no-cache",
       headers: { Authorization: `Bearer ${getToken()}` },
     })
       .then(async (res) => {
