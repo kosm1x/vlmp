@@ -87,7 +87,10 @@ It is one string, the same characters everywhere:
 **include it.** Image pointers are the version's shorter prefixes (`0.1.9.4`
 yields `0.1.9` and `0.1`), so a three-part release publishes an image tag that a
 later fourth-part build will move. Tagging `v0.2.0.0` keeps every four-part name
-immutable and every shorter one unambiguously a pointer.
+immutable and every shorter one unambiguously a pointer. A **fifth part**
+(`v0.1.9.9.1`) is the same idea one level down — a hotfix on a published build;
+it is immutable like any 4-part tag, and the moving pointers stay the 1–3-part
+prefixes (`0.1.9`, `0.1`), so publishing it never reuses a 4-part name.
 
 Pre-releases append a semver-style suffix (`v0.2.0.0-rc.1`) and publish only
 their own exact tag — never `latest`, never a moving pointer.

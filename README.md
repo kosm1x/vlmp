@@ -127,13 +127,13 @@ If you would rather keep data in a host folder, swap the volume line in `docker-
 
 | Tag          | Example    | Moves?                                   |
 | ------------ | ---------- | ---------------------------------------- |
-| `v<version>` | `v0.1.9.9` | Never — the git tag verbatim             |
-| Four parts   | `0.1.9.9`  | Never — a pointer is never four parts    |
+| `v<version>` | `v0.1.9.9.1` | Never — the git tag verbatim              |
+| Four+ parts  | `0.1.9.9.1`  | Never — a pointer never has four+ parts   |
 | Three parts  | `0.1.9`    | To the newest build on that patch line   |
 | Two parts    | `0.1`      | To the newest release on that minor line |
 | `latest`     | —          | To the newest release overall            |
 
-For a fully immutable pin use `v0.1.9.9` or the four-part `0.1.9.9`. (Container images start at **0.1.9.5** — earlier tags exist in git and as GitHub releases, but were never published to GHCR, so `0.1.9.4` and below are not pullable.) Note the overlap: a release tagged with only three parts (`v0.2.0`) publishes `0.2.0`, and that same name later becomes the patch-line pointer when `v0.2.0.1` ships — so prefer the `v`-prefixed tag if you want a name that can never be reused.
+For a fully immutable pin use `v0.1.9.9.1` or the full `0.1.9.9.1`. (Container images start at **0.1.9.5** — earlier tags exist in git and as GitHub releases, but were never published to GHCR, so `0.1.9.4` and below are not pullable.) Note the overlap: a release tagged with only three parts (`v0.2.0`) publishes `0.2.0`, and that same name later becomes the patch-line pointer when `v0.2.0.1` ships — so prefer the `v`-prefixed tag if you want a name that can never be reused.
 
 Pointers only ever move forward, and pre-releases (`-rc.N`) never take one.
 
@@ -222,7 +222,7 @@ GET /api/info
 ```json
 {
   "name": "My VLMP",
-  "version": "0.1.9.9",
+  "version": "0.1.9.9.1",
   "publicUrl": "https://vlmp.example.com",
   "fingerprint": "vlmp-a3f2b1",
   "capabilities": ["hls", "subtitles", "playlists", "federation"]
@@ -269,6 +269,7 @@ The full module map and REST API reference live in the source tree under [`serve
 
 ### Shipped in v0.1.x
 
+- v0.1.9.9.1 — category pages mirror the on-disk folder structure in sequence; scanner follows external symlinks and no longer silently drops files (`.m2ts`/`.mts`, short numbered lessons, `S00` specials, mid-scan errors); thumbnails re-keyed by file path — a deleted category's images can no longer appear on new media; view-triggered rescan: opening a category refreshes its own folders (`VLMP_AUTO_RESCAN_COOLDOWN_SECONDS`)
 - v0.1.9.9 — Docker data moves to the named volume `vlmp-data` (migration required — see the upgrade warning in Quick start); per-line gates for the `0.1.9`/`0.1` image pointers; subtitle extraction can no longer hang a scan; installer service scripts fail closed
 - v0.1.9.8 — Security: fast-uri 3.1.4 + brace-expansion 5.0.8 (npm audit now clean)
 - v0.1.9.7 — Security: fastify 5.10 / @fastify/static 10 (closes the high-severity advisories); kill guards use real liveness
