@@ -15,15 +15,16 @@ describe("readAppVersion", () => {
     expect(readAppVersion()).toBe(pkgVersion);
   });
 
-  // MAJOR.MINOR.PATCH[.BUILD] with an optional pre-release suffix, deliberately
-  // not semver — see CONTRIBUTING.md § Versioning. The suffix must start with a
-  // LETTER: that is what separates a real pre-release ("0.2.0.0-rc.1") from npm's
-  // prerelease encoding of a build number ("0.1.9-4"), which is exactly the form
-  // this scheme replaced. An earlier `-[0-9A-Za-z.]+` suffix accepted "0.1.9-4"
-  // and so pinned nothing.
-  const SCHEME = /^\d+\.\d+\.\d+(\.\d+)?(-[A-Za-z][0-9A-Za-z.]*)?$/;
+  // MAJOR.MINOR.PATCH[.BUILD[.HOTFIX]] with an optional pre-release suffix,
+  // deliberately not semver — see CONTRIBUTING.md § Versioning (the fifth part
+  // is a hotfix on a published build, added for v0.1.9.9.1). The suffix must
+  // start with a LETTER: that is what separates a real pre-release
+  // ("0.2.0.0-rc.1") from npm's prerelease encoding of a build number
+  // ("0.1.9-4"), which is exactly the form this scheme replaced. An earlier
+  // `-[0-9A-Za-z.]+` suffix accepted "0.1.9-4" and so pinned nothing.
+  const SCHEME = /^\d+\.\d+\.\d+(\.\d+){0,2}(-[A-Za-z][0-9A-Za-z.]*)?$/;
 
-  it("keeps package.json on the 4-part scheme", () => {
+  it("keeps package.json on the documented 3-to-5-part scheme", () => {
     expect(pkgVersion).toMatch(SCHEME);
   });
 
@@ -36,6 +37,7 @@ describe("readAppVersion", () => {
       "0.2.0.0-rc.1",
       "1.0.0.0",
       "0.10.0.1",
+      "0.1.9.9.1",
     ]) {
       expect(v, `${v} must be a valid version`).toMatch(SCHEME);
     }
@@ -44,7 +46,7 @@ describe("readAppVersion", () => {
       "0.1.9-5",
       "0.1.9-0",
       "0.1",
-      "0.1.9.4.5",
+      "0.1.9.4.5.6",
       "v0.1.9.4",
       "0.1.9.4-",
     ]) {
