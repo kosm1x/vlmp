@@ -74,8 +74,14 @@ npm run test         # vitest run
   whose path is identity must be ancestor-chain, never global.
 - **Thumbnails are keyed by sha256(file_path) prefix, never by row id** —
   `media_items.id` is a plain rowid and SQLite recycles it after DELETE; an
-  id-keyed disk cache re-attaches a deleted item's frame to new media. The
-  `/media/:id/thumb` route revalidates (no-cache + ETag) for the same reason.
+  id-keyed disk cache re-attaches a deleted item's frame to new media.
+- **Thumbnail HTTP caching is content-addressed, not revalidated**: clients
+  send `?v=<updated_at>` and versioned responses are `immutable` — a
+  recycled/reclassified id arrives under a new URL, so the browser cache can
+  be maximally aggressive with zero staleness. Per-fetch revalidation was
+  tried (r1) and crawls: it scales per-tile-per-page-load, addressing scales
+  per-change. The bare (unversioned) URL keeps no-cache as the fallback.
+  Every ThumbImg call site must pass `version`.
 - **`group_title`/`group_sort_title`/`group_position`** carry folder grouping
   for non-episode rows; `group_sort_title` must stay in lockstep with the
   `sort_title` normalization (`normalizeSortTitle`) or the browse COALESCE
