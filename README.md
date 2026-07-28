@@ -222,7 +222,7 @@ GET /api/info
 ```json
 {
   "name": "My VLMP",
-  "version": "0.1.9.9.1-r1",
+  "version": "0.1.9.9.1-r2",
   "publicUrl": "https://vlmp.example.com",
   "fingerprint": "vlmp-a3f2b1",
   "capabilities": ["hls", "subtitles", "playlists", "federation"]
@@ -269,6 +269,7 @@ The full module map and REST API reference live in the source tree under [`serve
 
 ### Shipped in v0.1.x
 
+- v0.1.9.9.1-r2 — thumbnails are content-addressed (`?v=<updated_at>` + immutable caching): grids load from the browser cache with zero requests, and a changed/recycled item busts its own URL — r1's always-revalidate mode (one round-trip per tile per load) is retired to a fallback
 - v0.1.9.9.1-r1 — thumbnails: browsers upgrading from pre-v0.1.9.9.1 kept serving ghost images from their own HTTP cache for up to a day (the old 24h header outlived the server fix); the client now always revalidates. Client-only; the `latest`/`0.1.9`/`0.1` image pointers intentionally stay on 0.1.9.9.1
 - v0.1.9.9.1 — category pages mirror the on-disk folder structure in sequence; scanner follows external symlinks and no longer silently drops files (`.m2ts`/`.mts`, short numbered lessons, `S00` specials, mid-scan errors); thumbnails re-keyed by file path — a deleted category's images can no longer appear on new media; view-triggered rescan: opening a category refreshes its own folders (`VLMP_AUTO_RESCAN_COOLDOWN_SECONDS`)
 - v0.1.9.9 — Docker data moves to the named volume `vlmp-data` (migration required — see the upgrade warning in Quick start); per-line gates for the `0.1.9`/`0.1` image pointers; subtitle extraction can no longer hang a scan; installer service scripts fail closed

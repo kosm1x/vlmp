@@ -8,10 +8,10 @@ this checklist passes on real hardware).
 ## Installer (recommended)
 
 Download `vlmp-setup-<version>-win-x64.exe` from
-<https://github.com/kosm1x/vlmp/releases> (v0.1.9.9.1-r1 published 2026-07-28;
+<https://github.com/kosm1x/vlmp/releases> (v0.1.9.9.1-r2 published 2026-07-28;
 SmartScreen warns on unsigned installers — "More info → Run anyway").
 Verify the download against the SHA256 printed on the release page:
-`Get-FileHash vlmp-setup-0.1.9.9.1-r1-win-x64.exe -Algorithm SHA256`.
+`Get-FileHash vlmp-setup-0.1.9.9.1-r2-win-x64.exe -Algorithm SHA256`.
 Do not run v0.1.5 — its seek/quality-switch timestamps were broken
 (fixed in v0.1.6).
 v0.1.0 had a launcher ACL bug that left `jwt.secret` with an empty DACL on
