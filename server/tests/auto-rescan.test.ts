@@ -159,6 +159,15 @@ describe("POST /library/categories/:slug/refresh", () => {
         headers: { authorization: `Bearer ${adminToken}` },
       });
       expect(during.json()).toEqual({ started: 0, scanning: true });
+      // The visibility gate holds on this branch too: a viewer must not see
+      // a HIDDEN folder's scan through the disabled-feature path.
+      db.prepare("UPDATE library_folders SET is_visible = 0").run();
+      const viewer = await offApp.inject({
+        method: "POST",
+        url: "/library/categories/movies/refresh",
+        headers: { authorization: `Bearer ${userToken}` },
+      });
+      expect(viewer.json()).toEqual({ started: 0, scanning: false });
     } finally {
       await offApp.close();
     }

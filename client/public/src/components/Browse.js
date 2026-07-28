@@ -196,11 +196,16 @@ function CategoryGrid({ category }) {
   // Category switches reconcile the SAME component instance — a slow response
   // for the old category must not land in the new one's grid.
   const genRef = useRef(0);
+  // Mirror of `data` for async closures: the settle path decides between an
+  // error banner (nothing rendered yet) and staying quiet (grid already on
+  // screen) — the closure's `data` binding is frozen at first render.
+  const dataRef = useRef(null);
 
   useEffect(() => {
     const gen = ++genRef.current;
     setCat(undefined);
     setData(null);
+    dataRef.current = null;
     setError("");
     setLoading(true);
     fetchCategories()
@@ -217,7 +222,10 @@ function CategoryGrid({ category }) {
         }
         return loadCategoryFull(category)
           .then((d) => {
-            if (gen === genRef.current) setData(d);
+            if (gen === genRef.current) {
+              setData(d);
+              dataRef.current = d;
+            }
           })
           .catch((err) => {
             if (gen === genRef.current)
@@ -247,6 +255,10 @@ function CategoryGrid({ category }) {
     const MAX_POLL_MS = 10 * 60_000;
     // Refetch which ALWAYS runs when polling ends — on completion or on the
     // time cap — so a finished scan can never leave pre-scan data cached.
+    // Residual: the cap path caches a MID-scan snapshot; it converges on the
+    // next visit because the default cooldown (300s) is shorter than this
+    // cap. An operator setting the cooldown far above 10 min accepts that a
+    // >10-min scan's tail shows up one cooldown later.
     // The rescan may have deleted + reinserted rows onto recycled ids, so
     // stale id-keyed thumbs go too; bumping the generation kills any
     // still-in-flight pre-scan state write from this mount's initial load.
@@ -256,11 +268,16 @@ function CategoryGrid({ category }) {
       const myGen = ++genRef.current;
       try {
         const d = await loadCategoryFull(category);
-        if (!stopped && myGen === genRef.current) setData(d);
+        if (!stopped && myGen === genRef.current) {
+          setData(d);
+          dataRef.current = d;
+        }
       } catch (err) {
         // The generation bump disarmed the initial load's error/loading
-        // handlers — leaving state untouched here would strand the spinner.
-        if (!stopped && myGen === genRef.current)
+        // handlers — but only a BLANK page earns the error banner. A settle
+        // refetch failing over an already-rendered grid must stay quiet:
+        // the grid is intact and nothing would ever clear the banner.
+        if (!stopped && myGen === genRef.current && !dataRef.current)
           setError(err.message || "Failed to load library");
       } finally {
         if (!stopped && myGen === genRef.current) setLoading(false);

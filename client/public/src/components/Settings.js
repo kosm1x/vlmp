@@ -25,7 +25,7 @@ export function Settings() {
   const [userPending, setUserPending] = useState(false);
   const [busyUser, setBusyUser] = useState(null);
   const pollTimer = useRef(null);
-  const pollAttempts = useRef(0);
+  const pollStart = useRef(null);
   const metaTimer = useRef(null);
   const mountedRef = useRef(true);
   const [metaScan, setMetaScan] = useState(null);
@@ -259,26 +259,26 @@ export function Settings() {
     }
   }
 
-  // While any folder is scanning, refresh until every scan settles — capped
-  // (~2 min) so a folder wedged in 'scanning' can't poll forever. On settle,
-  // cap, or a failed refresh alike, invalidate: whatever the scan managed to
-  // write is live and the cached browse pages are stale either way.
+  // While any folder is scanning, refresh until every scan settles —
+  // time-boxed (10 min, matching the Browse poll: attempt caps under-shot
+  // multi-folder sequential scans) so a folder wedged in 'scanning' can't
+  // poll forever. The box is per CHAIN: pollStart clears on every terminal
+  // branch, so a later scan gets its own full window. On settle and cap
+  // alike, invalidate — whatever the scan managed to write is live. load()
+  // never rejects (it swallows and returns null), and a null here takes the
+  // not-scanning branch, which still invalidates.
   function pollWhileScanning(data) {
     if (!mountedRef.current) return;
     const scanning = data && data.some((f) => f.scan_status === "scanning");
-    if (!scanning || ++pollAttempts.current > 40) {
-      pollAttempts.current = 0;
+    if (pollStart.current === null) pollStart.current = Date.now();
+    if (!scanning || Date.now() - pollStart.current > 10 * 60_000) {
+      pollStart.current = null;
       invalidateLibraryCache();
       return;
     }
     clearTimeout(pollTimer.current);
     pollTimer.current = setTimeout(async () => {
-      try {
-        pollWhileScanning(await load());
-      } catch {
-        pollAttempts.current = 0;
-        invalidateLibraryCache();
-      }
+      pollWhileScanning(await load());
     }, 3000);
   }
 
