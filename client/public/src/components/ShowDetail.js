@@ -63,6 +63,7 @@ export function ShowDetail({ id }) {
             : firstEpisode
               ? html`<${ThumbImg}
                   mediaId=${firstEpisode.media_id}
+                  version=${firstEpisode.updated_at}
                   title=${show.title}
                 />`
               : html`<div class="detail-no-poster">${show.title}</div>`
@@ -139,9 +140,9 @@ export function ShowDetail({ id }) {
                           <button
                             class="lum-btn"
                             onClick=${(ev) => {
-                            ev.stopPropagation();
-                            navigate("/play/" + e.media_id + "?show=" + id);
-                          }}
+                              ev.stopPropagation();
+                              navigate("/play/" + e.media_id + "?show=" + id);
+                            }}
                             aria-label=${`Play episode ${e.episode_number}`}
                           >
                             ▶ Play

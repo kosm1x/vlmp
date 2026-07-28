@@ -285,7 +285,30 @@ describe.skipIf(process.platform === "win32")("GET /media/:id/thumb", () => {
     expect(res.statusCode).toBe(404);
   });
 
-  // The URL is id-addressed and ids get recycled, so browsers must
+  // Content-addressed mode: with ?v=<row version> the URL changes whenever
+  // the row behind the id changes, so the response is safe to cache long —
+  // this is what keeps big grids off the network entirely.
+  it("a versioned request is long-cacheable, an unversioned one is not", async () => {
+    const id = addMedia(1);
+    const versioned = await app.inject({
+      method: "GET",
+      url: `/media/${id}/thumb?v=12345`,
+      headers: { authorization: `Bearer ${userToken}` },
+    });
+    expect(versioned.statusCode).toBe(200);
+    expect(versioned.headers["cache-control"]).toBe(
+      "private, max-age=2592000, immutable",
+    );
+    expect(versioned.headers.etag).toBeTruthy();
+    const bare = await app.inject({
+      method: "GET",
+      url: `/media/${id}/thumb`,
+      headers: { authorization: `Bearer ${userToken}` },
+    });
+    expect(bare.headers["cache-control"]).toBe("private, no-cache");
+  });
+
+  // The bare URL is id-addressed and ids get recycled, so browsers must
   // revalidate: no-cache + ETag, with a 304 when the bytes are unchanged.
   it("forces revalidation and answers 304 to a matching If-None-Match", async () => {
     const id = addMedia(1);

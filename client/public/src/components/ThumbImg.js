@@ -7,21 +7,33 @@ const html = htm.bind(h);
 // Generated-thumbnail <img> for media without a TMDb poster. Plain <img src>
 // can't send the Authorization header, so the thumb is fetched and rendered
 // as a blob URL. Session cache: one fetch (and one server-side ffmpeg, ever)
-// per media id; null marks a server-confirmed miss (404) so those don't
-// refetch every render. Transient failures (network, expired token) are NOT
-// cached — the next render retries. Bounded: oldest blob is revoked+evicted
-// past the cap (Map preserves insertion order).
+// per (media id, version); null marks a server-confirmed miss (404) so those
+// don't refetch every render. Transient failures (network, expired token) are
+// NOT cached — the next render retries. Bounded: oldest blob is revoked+
+// evicted past the cap (Map preserves insertion order).
+//
+// CACHING STRATEGY — content-addressed, not revalidated. Media ids get
+// RECYCLED server-side after a folder delete (SQLite rowid reuse), so a bare
+// id URL can later point at a different file. Revalidating every fetch fixed
+// that but cost one round-trip per tile per page load — a big grid crawled.
+// Instead, callers pass `version` (the row's updated_at): the URL embeds it,
+// the server marks versioned responses immutable, and the browser serves
+// them from cache with ZERO network. A recycled or reclassified id arrives
+// with a NEW version → new URL → cache miss → fresh image. Refresh therefore
+// happens exactly when the window loads fresh data, never per render.
+// Callers without a version fall back to the revalidating mode.
 const cache = new Map();
 const CACHE_MAX = 300;
 
-// Media ids get RECYCLED server-side after a folder delete (SQLite rowid
-// reuse), so an id-keyed blob — or a remembered 404 — can belong to a media
-// item that no longer exists. Callers that invalidate the library cache must
-// drop these too, or a new item renders a deleted item's frame.
+const cacheKey = (mediaId, version) => `${mediaId}:${version ?? ""}`;
+
+// A remembered blob can still belong to a deleted item (same id+version can
+// in principle be re-served within a session across a folder delete), so
+// library invalidation drops these too.
 //
 // Mounted components must be woken up as well: their src state holds a blob
-// URL this revokes, and their [mediaId] effect would never re-run on its own
-// — a lazy image scrolled into view later would load a dead URL forever.
+// URL this revokes, and their effect would never re-run on its own — a lazy
+// image scrolled into view later would load a dead URL forever.
 const invalidationListeners = new Set();
 
 export function invalidateThumbCache() {
@@ -30,19 +42,18 @@ export function invalidateThumbCache() {
   for (const wake of invalidationListeners) wake();
 }
 
-function remember(mediaId, value) {
+function remember(key, value) {
   if (cache.size >= CACHE_MAX) {
-    const [oldestId, oldest] = cache.entries().next().value;
+    const [oldestKey, oldest] = cache.entries().next().value;
     if (oldest) URL.revokeObjectURL(oldest);
-    cache.delete(oldestId);
+    cache.delete(oldestKey);
   }
-  cache.set(mediaId, value);
+  cache.set(key, value);
 }
 
-export function ThumbImg({ mediaId, title }) {
-  const [src, setSrc] = useState(
-    cache.has(mediaId) ? cache.get(mediaId) : undefined,
-  );
+export function ThumbImg({ mediaId, title, version }) {
+  const key = cacheKey(mediaId, version);
+  const [src, setSrc] = useState(cache.has(key) ? cache.get(key) : undefined);
   // Bumped by invalidateThumbCache so the fetch effect re-runs even though
   // mediaId is unchanged (the cached URL it holds has been revoked).
   const [gen, setGen] = useState(0);
@@ -54,34 +65,35 @@ export function ThumbImg({ mediaId, title }) {
   }, []);
 
   useEffect(() => {
-    if (cache.has(mediaId)) {
-      setSrc(cache.get(mediaId));
+    const k = cacheKey(mediaId, version);
+    if (cache.has(k)) {
+      setSrc(cache.get(k));
       return;
     }
     let alive = true;
-    // cache:"no-cache" = always revalidate, the request-side mirror of the
-    // server's `Cache-Control: private, no-cache`. It is what evicts GHOSTS
-    // left by pre-v0.1.9.9.1 servers: those sent max-age=86400, so a browser
-    // holding such an entry serves a deleted item's image WITHOUT any request
-    // — the fixed server never gets asked. With no-cache the entry is
-    // revalidated (old entries carry no ETag, so they refetch outright);
-    // current entries cost a 304. The in-memory Map above still keeps it to
-    // one network round-trip per media id per session.
-    fetch(`/media/${mediaId}/thumb`, {
-      cache: "no-cache",
+    // Versioned URL → browser cache does the work (immutable server-side).
+    // Unversioned fallback → "no-cache" keeps a stable URL from ever serving
+    // a deleted item's image past one revalidation (and evicts ghost entries
+    // stamped by pre-v0.1.9.9.1 servers, which carried max-age=86400).
+    const versioned = version != null;
+    const url = versioned
+      ? `/media/${mediaId}/thumb?v=${encodeURIComponent(version)}`
+      : `/media/${mediaId}/thumb`;
+    fetch(url, {
+      cache: versioned ? "default" : "no-cache",
       headers: { Authorization: `Bearer ${getToken()}` },
     })
       .then(async (res) => {
         if (res.status === 404) {
           // Server-confirmed: no thumbnail possible. Safe to remember.
-          remember(mediaId, null);
+          remember(k, null);
           if (alive) setSrc(null);
           return;
         }
         if (!res.ok) throw new Error("transient");
-        const url = URL.createObjectURL(await res.blob());
-        remember(mediaId, url);
-        if (alive) setSrc(url);
+        const blobUrl = URL.createObjectURL(await res.blob());
+        remember(k, blobUrl);
+        if (alive) setSrc(blobUrl);
       })
       .catch(() => {
         // Network blip / expired token: don't poison the cache — leave the
@@ -91,7 +103,7 @@ export function ThumbImg({ mediaId, title }) {
     return () => {
       alive = false;
     };
-  }, [mediaId, gen]);
+  }, [mediaId, version, gen]);
 
   // onError: last-resort fallback if a revoked blob URL slips through to a
   // render — degrade to the text placeholder instead of a broken image.

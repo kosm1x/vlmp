@@ -23,6 +23,7 @@ export function ShowCard({ show }) {
           : show.first_media_id
             ? html`<${ThumbImg}
                 mediaId=${show.first_media_id}
+                version=${show.added_at}
                 title=${show.title}
               />`
             : html`<div class="no-poster">${show.title}</div>`

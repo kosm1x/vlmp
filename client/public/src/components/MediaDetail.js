@@ -177,7 +177,11 @@ export function MediaDetail({ id, serverId }) {
         ${
           media.poster_path
             ? html`<img src=${media.poster_path} alt=${media.title} />`
-            : html`<${ThumbImg} mediaId=${media.id} title=${media.title} />`
+            : html`<${ThumbImg}
+                mediaId=${media.id}
+                version=${media.updated_at ?? media.added_at}
+                title=${media.title}
+              />`
         }
       </div>
       <div class="detail-info">

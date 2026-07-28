@@ -36,7 +36,7 @@ export function registerMetadataRoutes(
   // access boundary as media detail: non-admins only reach media in visible
   // folders (404, not 403 — existence must not leak). The client fetches this
   // with the Authorization header and renders a blob URL.
-  app.get<{ Params: { id: string } }>(
+  app.get<{ Params: { id: string }; Querystring: { v?: string } }>(
     "/media/:id/thumb",
     { preHandler: auth },
     async (request, reply) => {
@@ -45,11 +45,6 @@ export function registerMetadataRoutes(
         return reply.code(404).send({ error: "Not found" });
       const path = await getOrCreateThumb(db, id, config);
       if (!path) return reply.code(404).send({ error: "No thumbnail" });
-      // The URL is /media/<id>/thumb and row ids get RECYCLED after a folder
-      // delete (rowid reuse), so the same URL can legitimately point at a
-      // different file later. A blind max-age let browsers serve a deleted
-      // category's image for a day — force revalidation instead; unchanged
-      // thumbs cost a 304, never a re-download.
       let etag: string;
       try {
         const s = await stat(path);
@@ -57,7 +52,21 @@ export function registerMetadataRoutes(
       } catch {
         return reply.code(404).send({ error: "No thumbnail" });
       }
-      reply.header("Cache-Control", "private, no-cache");
+      // Row ids get RECYCLED after a folder delete (rowid reuse), so the bare
+      // URL can legitimately point at a different file later — but forcing
+      // revalidation on every fetch made each page load pay one round-trip
+      // per tile, which crawled on big grids. Two modes instead:
+      //   ?v=<row version> (the client sends updated_at): the URL now changes
+      //   whenever the row behind the id changes, so it is safe to cache LONG
+      //   — a recycled id arrives under a fresh ?v and misses the cache.
+      //   No ?v (fallback callers only): keep no-cache so a stable URL can
+      //   never serve a deleted item's image past one revalidation.
+      reply.header(
+        "Cache-Control",
+        request.query.v !== undefined
+          ? "private, max-age=2592000, immutable"
+          : "private, no-cache",
+      );
       reply.header("ETag", etag);
       if (request.headers["if-none-match"] === etag)
         return reply.code(304).send();

@@ -21,7 +21,11 @@ export function MediaCard({ item }) {
               alt=${item.title}
               loading="lazy"
             />`
-          : html`<${ThumbImg} mediaId=${mediaId} title=${item.title} />`
+          : html`<${ThumbImg}
+              mediaId=${mediaId}
+              version=${item.updated_at ?? item.added_at}
+              title=${item.title}
+            />`
       }
       ${
         progress > 0 &&

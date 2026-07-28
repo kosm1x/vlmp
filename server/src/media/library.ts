@@ -810,7 +810,7 @@ export function getTVShowDetail(
       )}))`;
   const rows = db
     .prepare(
-      `SELECT s.*, json_group_array(json_object('id', e.id, 'episode_number', e.episode_number, 'media_id', e.media_id, 'title', mi.title, 'duration', mi.duration, 'poster_path', mi.poster_path)) as episodes FROM seasons s LEFT JOIN episodes e ON e.season_id = s.id ${epGate} LEFT JOIN media_items mi ON mi.id = e.media_id WHERE s.show_id = ? GROUP BY s.id ORDER BY s.season_number`,
+      `SELECT s.*, json_group_array(json_object('id', e.id, 'episode_number', e.episode_number, 'media_id', e.media_id, 'title', mi.title, 'duration', mi.duration, 'poster_path', mi.poster_path, 'updated_at', mi.updated_at)) as episodes FROM seasons s LEFT JOIN episodes e ON e.season_id = s.id ${epGate} LEFT JOIN media_items mi ON mi.id = e.media_id WHERE s.show_id = ? GROUP BY s.id ORDER BY s.season_number`,
     )
     .all(showId) as ({ episodes: string } & Record<string, unknown>)[];
   // json_group_array returns a JSON STRING per row, and a season whose
