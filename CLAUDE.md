@@ -65,6 +65,30 @@ npm run test         # vitest run
   in-line, so one unbounded child strands a folder at `scan_status='scanning'`
   forever. The last gap (`subtitles/extract.ts`) was closed in v0.1.9.9; a new
   spawn site without a bound reopens the class.
+- **`file_path` is the library's identity key** (thumbs, rescan lookup,
+  empty-trash prune all key on it), so discovery must be deterministic:
+  `discover.ts` walks real paths as canonical and follows symlinks ONLY when
+  they point outside the library root. A global visited-set here once made an
+  alias race its real directory by readdir order — the loser's rows were
+  pruned, cascading watch progress/likes/playlists. Cycle guards on a walk
+  whose path is identity must be ancestor-chain, never global.
+- **Thumbnails are keyed by sha256(file_path) prefix, never by row id** —
+  `media_items.id` is a plain rowid and SQLite recycles it after DELETE; an
+  id-keyed disk cache re-attaches a deleted item's frame to new media. The
+  `/media/:id/thumb` route revalidates (no-cache + ETag) for the same reason.
+- **`group_title`/`group_sort_title`/`group_position`** carry folder grouping
+  for non-episode rows; `group_sort_title` must stay in lockstep with the
+  `sort_title` normalization (`normalizeSortTitle`) or the browse COALESCE
+  interleave breaks.
+- **Destructive branches get their own, more lenient gate**: the short-sample
+  filter is strict on INSERT (grouped/episode files only are exempt) but
+  lenient on the rescan DELETE branch (any numbered file is spared) — a
+  shared predicate tightened for insert quality once turned the delete branch
+  into automatic data loss.
+- **View-triggered rescan** (`/library/categories/:slug/refresh`): per-folder
+  cooldown is in-process on purpose (error folders must honor it too); a
+  category's folders scan SEQUENTIALLY; the client poll is time-boxed, not
+  attempt-capped, and its settle refetch always runs when polling ends.
 - **Never signal a child without `isProcessAlive()`** (`process-liveness.ts`, a
   dependency-free module so scanner/metadata/streaming can all use it without
   import cycles; re-exported from `streaming/transcoder.ts`).
