@@ -243,6 +243,21 @@ describe("discoverMedia — symlinks, cycles, extensions", () => {
     },
   );
 
+  // startsWith(root + sep) breaks when the root IS a filesystem root ("/",
+  // "D:\") — the doubled separator never matches and every internal link
+  // reads as external (duplicate rows for the whole tree).
+  it("isInside handles filesystem roots, '..', and sibling-prefix names", async () => {
+    const { isInside } = await import("../src/scanner/discover.js");
+    expect(isInside("/", "/")).toBe(true);
+    expect(isInside("/foo", "/")).toBe(true); // the drive-root case
+    expect(isInside("/a/b/c", "/a/b")).toBe(true);
+    expect(isInside("/a/b", "/a/b")).toBe(true);
+    expect(isInside("/a", "/a/b")).toBe(false); // parent
+    expect(isInside("/x/y", "/a/b")).toBe(false); // unrelated
+    expect(isInside("/a/bc", "/a/b")).toBe(false); // sibling prefix
+    expect(isInside("/a/..foo", "/a")).toBe(true); // literal dot-dot name
+  });
+
   it("stops descending at the depth cap instead of recursing forever", async () => {
     let deep = root;
     for (let i = 0; i < 40; i++) deep = join(deep, `d${i}`);

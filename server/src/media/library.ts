@@ -228,6 +228,15 @@ export async function scanLibraryFolder(
         const sequenced =
           classified.type === "episode" ||
           (groupTitle != null && groupPosition != null);
+        // The DESTRUCTIVE branch is deliberately more lenient: ANY numbered
+        // file is spared. The strict grouped-only rule keeps release junk
+        // from being INSERTED; applying it to deletion would destroy
+        // pre-existing root-level numbered rows (and their watch progress,
+        // likes, playlist entries) on a rescan a mere page view now
+        // triggers. Worst case of leniency: an old junk row lingers. Worst
+        // case of strictness: user data is destroyed. Keep the junk.
+        const deletionExempt =
+          classified.type === "episode" || classified.episodeNumber != null;
         const existing = db
           .prepare(
             "SELECT id, type, title, year, duration, group_title, group_sort_title, group_position FROM media_items WHERE file_path = ?",
@@ -251,7 +260,7 @@ export async function scanLibraryFolder(
           // what VLMP_EMPTY_TRASH_ON_SCAN opts out of — honor it here too.
           if (
             config.emptyTrashOnScan &&
-            !sequenced &&
+            !deletionExempt &&
             isShortSample(file.isVideo, existing.duration, config)
           ) {
             db.prepare("DELETE FROM media_items WHERE id = ?").run(existing.id);

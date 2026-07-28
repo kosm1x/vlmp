@@ -25,6 +25,7 @@ export function Settings() {
   const [userPending, setUserPending] = useState(false);
   const [busyUser, setBusyUser] = useState(null);
   const pollTimer = useRef(null);
+  const pollAttempts = useRef(0);
   const metaTimer = useRef(null);
   const mountedRef = useRef(true);
   const [metaScan, setMetaScan] = useState(null);
@@ -258,18 +259,26 @@ export function Settings() {
     }
   }
 
-  // While any folder is scanning, refresh until every scan settles.
+  // While any folder is scanning, refresh until every scan settles — capped
+  // (~2 min) so a folder wedged in 'scanning' can't poll forever. On settle,
+  // cap, or a failed refresh alike, invalidate: whatever the scan managed to
+  // write is live and the cached browse pages are stale either way.
   function pollWhileScanning(data) {
     if (!mountedRef.current) return;
-    if (!data || !data.some((f) => f.scan_status === "scanning")) {
-      // Scans settled: the library changed, so the cached browse pages for
-      // every category are stale — drop them so the next visit refetches.
+    const scanning = data && data.some((f) => f.scan_status === "scanning");
+    if (!scanning || ++pollAttempts.current > 40) {
+      pollAttempts.current = 0;
       invalidateLibraryCache();
       return;
     }
     clearTimeout(pollTimer.current);
     pollTimer.current = setTimeout(async () => {
-      pollWhileScanning(await load());
+      try {
+        pollWhileScanning(await load());
+      } catch {
+        pollAttempts.current = 0;
+        invalidateLibraryCache();
+      }
     }, 3000);
   }
 

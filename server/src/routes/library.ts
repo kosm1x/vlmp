@@ -348,7 +348,10 @@ export function registerLibraryRoutes(
       const { slug } = request.params;
       const admin = request.user!.role === "admin";
       const cooldownMs = config.autoRescanCooldownSeconds * 1000;
-      if (cooldownMs === 0) return { started: 0, scanning: false };
+      // Feature off still reports REAL scanning state — an admin-triggered
+      // scan should let open pages poll and refresh when it lands.
+      if (cooldownMs === 0)
+        return { started: 0, scanning: scanningInCategory(slug, admin) };
       // Non-admins may only refresh — and observe — folders they can see; a
       // hidden category answers exactly like an empty one.
       const folders = db

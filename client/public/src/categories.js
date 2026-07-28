@@ -8,18 +8,24 @@ let inflight = null;
 
 export function fetchCategories() {
   if (cache) return Promise.resolve(cache);
-  if (!inflight)
-    inflight = get("/categories")
+  if (!inflight) {
+    const p = get("/categories")
       .then((cats) => {
-        cache = cats;
+        // Identity check: a request orphaned by invalidateCategories()
+        // predates the mutation and must not re-populate the cache (the
+        // same late-write race the browse fullCache had).
+        if (inflight === p) cache = cats;
         return cats;
       })
       .finally(() => {
-        inflight = null;
+        if (inflight === p) inflight = null;
       });
+    inflight = p;
+  }
   return inflight;
 }
 
 export function invalidateCategories() {
   cache = null;
+  inflight = null; // orphan any pre-mutation request still in flight
 }

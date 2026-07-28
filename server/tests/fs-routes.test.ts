@@ -80,6 +80,28 @@ describe("GET /admin/fs/dirs", () => {
     expect(body.dirs[0].path).toBe(join(root, "Movies"));
   });
 
+  it.skipIf(process.platform === "win32")(
+    "shows symlinked directories (external library composition targets)",
+    async () => {
+      const { symlinkSync } = await import("node:fs");
+      const external = mkdtempSync(join(tmpdir(), "vlmp-fs-ext-"));
+      try {
+        symlinkSync(external, join(root, "linked"));
+        symlinkSync(join(root, "gone"), join(root, "broken"));
+        const res = await app.inject({
+          method: "GET",
+          url: `/admin/fs/dirs?path=${encodeURIComponent(root)}`,
+          headers: hdr(adminToken),
+        });
+        const names = res.json().dirs.map((d: { name: string }) => d.name);
+        expect(names).toContain("linked"); // symlinked dir is pickable
+        expect(names).not.toContain("broken"); // broken link is not
+      } finally {
+        rmSync(external, { recursive: true, force: true });
+      }
+    },
+  );
+
   it("400s on an unreadable path", async () => {
     const res = await app.inject({
       method: "GET",

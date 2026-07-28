@@ -1,5 +1,5 @@
 import { readdir, stat, realpath } from "node:fs/promises";
-import { join, extname, sep } from "node:path";
+import { join, extname, sep, relative, isAbsolute } from "node:path";
 
 const VIDEO_EXTENSIONS = new Set([
   ".mkv",
@@ -58,8 +58,14 @@ export async function discoverMedia(
   return results;
 }
 
-function isInside(real: string, rootReal: string): boolean {
-  return real === rootReal || real.startsWith(rootReal + sep);
+// Exported for tests. path.relative instead of startsWith(root + sep): a
+// library at a filesystem root ("/", "D:\") ends in a separator, so the
+// naive prefix never matches and every internal link reads as external —
+// and on Windows, relative() also compares segments case-insensitively.
+export function isInside(real: string, rootReal: string): boolean {
+  const rel = relative(rootReal, real);
+  if (rel === "") return true;
+  return !isAbsolute(rel) && rel !== ".." && !rel.startsWith(".." + sep);
 }
 
 // Symlink rules — file_path is the library's IDENTITY key (thumbs, the

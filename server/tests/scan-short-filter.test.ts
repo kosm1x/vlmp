@@ -63,6 +63,37 @@ describe("insert-time short filter", () => {
     }
   });
 
+  // The DELETE branch is more lenient than the insert branch on purpose:
+  // an existing numbered row — even ungrouped, at the library root — holds
+  // watch progress/likes and must never be destroyed by the rescan a page
+  // view now triggers automatically.
+  it("rescan never deletes an existing numbered row, even ungrouped", async () => {
+    const root = mkdtempSync(join(tmpdir(), "vlmp-shortdel-"));
+    try {
+      writeFileSync(join(root, "01 - Welcome.mp4"), "x");
+      writeFileSync(join(root, "junk.mp4"), "x");
+      const folder = addLibraryFolder(db, root, "education");
+      // Pre-existing rows from an older version, both with known short
+      // durations (85s < the 120s floor).
+      const ins = db.prepare(
+        "INSERT INTO media_items (library_folder_id, type, file_path, title, sort_title, duration) VALUES (?, 'education', ?, ?, ?, 85)",
+      );
+      ins.run(folder.id, join(root, "01 - Welcome.mp4"), "Welcome", "welcome");
+      ins.run(folder.id, join(root, "junk.mp4"), "junk", "junk");
+      const result = await scanLibraryFolder(db, folder, scanConfig);
+      const titles = (
+        db.prepare("SELECT title FROM media_items ORDER BY title").all() as {
+          title: string;
+        }[]
+      ).map((r) => r.title);
+      // The unnumbered junk row is pruned; the numbered lesson survives.
+      expect(result.skippedShort).toBe(1);
+      expect(titles).toEqual(["Welcome"]);
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
+  });
+
   it("keeps a short SxxEyy episode (recaps/teasers are content)", async () => {
     const root = mkdtempSync(join(tmpdir(), "vlmp-shortep-"));
     try {

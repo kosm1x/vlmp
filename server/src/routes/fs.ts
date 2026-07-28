@@ -69,15 +69,25 @@ export function registerFsRoutes(
     } catch {
       return reply.code(400).send({ error: `Cannot read directory: ${path}` });
     }
-    const dirs = entries
-      .filter(
-        (e) =>
-          e.isDirectory() && !e.name.startsWith(".") && !WIN_JUNK.has(e.name),
-      )
-      .map((e) => ({ name: e.name, path: join(path, e.name) }))
-      .sort((a, b) =>
-        a.name.localeCompare(b.name, undefined, { sensitivity: "base" }),
-      );
+    const dirs: { name: string; path: string }[] = [];
+    for (const e of entries) {
+      if (e.name.startsWith(".") || WIN_JUNK.has(e.name)) continue;
+      let isDir = e.isDirectory();
+      // Dirent reflects lstat: symlinked directories are neither file nor
+      // dir. The scanner now follows external symlinks to compose libraries,
+      // so the picker must show them or the feature is unreachable.
+      if (!isDir && e.isSymbolicLink()) {
+        try {
+          isDir = (await stat(join(path, e.name))).isDirectory();
+        } catch {
+          continue; // broken link
+        }
+      }
+      if (isDir) dirs.push({ name: e.name, path: join(path, e.name) });
+    }
+    dirs.sort((a, b) =>
+      a.name.localeCompare(b.name, undefined, { sensitivity: "base" }),
+    );
     // At a filesystem root, "up" leaves the tree: on Windows that goes back to
     // the drive list (parent null + path non-null), on POSIX it disappears.
     const { root } = parse(path);

@@ -150,6 +150,15 @@ describe("POST /library/categories/:slug/refresh", () => {
       });
       expect(res.json()).toEqual({ started: 0, scanning: false });
       expect(folderStatus(folder.id)).toBe("pending");
+      // Feature off must still report REAL scanning state, so open pages
+      // can follow an admin-triggered scan and refresh when it lands.
+      db.prepare("UPDATE library_folders SET scan_status = 'scanning'").run();
+      const during = await offApp.inject({
+        method: "POST",
+        url: "/library/categories/movies/refresh",
+        headers: { authorization: `Bearer ${adminToken}` },
+      });
+      expect(during.json()).toEqual({ started: 0, scanning: true });
     } finally {
       await offApp.close();
     }

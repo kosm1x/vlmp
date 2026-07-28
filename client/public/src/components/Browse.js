@@ -238,33 +238,49 @@ function CategoryGrid({ category }) {
     const enc = encodeURIComponent(category);
     let timer;
     let stopped = false;
-    // Cap the chain (~2 min): a folder wedged in 'scanning' must not turn
-    // every open tab into an indefinite 20-req/min poller.
-    let attempts = 0;
-    const MAX_POLLS = 40;
+    // Time-boxed, not attempt-boxed: multi-folder categories scan their
+    // folders SEQUENTIALLY server-side, so legitimate refreshes can run for
+    // minutes — an attempt cap sized for one folder expired before settle
+    // and left the stale snapshot cached past the cooldown. Back off to
+    // 10s after the first minute; a wedged folder costs ~6 req/min, capped.
+    const startedAt = Date.now();
+    const MAX_POLL_MS = 10 * 60_000;
+    // Refetch which ALWAYS runs when polling ends — on completion or on the
+    // time cap — so a finished scan can never leave pre-scan data cached.
+    // The rescan may have deleted + reinserted rows onto recycled ids, so
+    // stale id-keyed thumbs go too; bumping the generation kills any
+    // still-in-flight pre-scan state write from this mount's initial load.
+    const settle = async () => {
+      fullCache.delete(cacheKey(category));
+      invalidateThumbCache();
+      const myGen = ++genRef.current;
+      try {
+        const d = await loadCategoryFull(category);
+        if (!stopped && myGen === genRef.current) setData(d);
+      } catch (err) {
+        // The generation bump disarmed the initial load's error/loading
+        // handlers — leaving state untouched here would strand the spinner.
+        if (!stopped && myGen === genRef.current)
+          setError(err.message || "Failed to load library");
+      } finally {
+        if (!stopped && myGen === genRef.current) setLoading(false);
+      }
+    };
     const poll = async () => {
       if (stopped || gen !== genRef.current) return;
       try {
         const s = await get(`/library/categories/${enc}/scan-status`);
         if (stopped || gen !== genRef.current) return;
-        if (s && s.scanning) {
-          if (++attempts < MAX_POLLS) timer = setTimeout(poll, 3000);
+        if (s && s.scanning && Date.now() - startedAt < MAX_POLL_MS) {
+          timer = setTimeout(
+            poll,
+            Date.now() - startedAt < 60_000 ? 3000 : 10_000,
+          );
           return;
         }
-        // Settled. The rescan may have deleted + reinserted rows onto
-        // recycled ids, so stale id-keyed thumbs must go too — and bumping
-        // the generation kills any still-in-flight pre-scan state write
-        // from this mount's initial load.
-        fullCache.delete(cacheKey(category));
-        invalidateThumbCache();
-        const myGen = ++genRef.current;
-        const d = await loadCategoryFull(category);
-        if (!stopped && myGen === genRef.current) {
-          setData(d);
-          setLoading(false);
-        }
+        await settle();
       } catch {
-        /* best-effort — the manual Scan button in Settings still exists */
+        /* scan-status blip — best-effort; manual Scan in Settings remains */
       }
     };
     post(`/library/categories/${enc}/refresh`)
