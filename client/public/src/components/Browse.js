@@ -93,21 +93,33 @@ function toCards(shows, items) {
 // A category's contents = its shows (episodes grouped as one card each) + its
 // loose items (browse with exclude_episodes so nothing appears twice). `all=1`
 // pulls the whole category in one shot; the result is cached by slug.
-async function loadCategoryFull(slug) {
+//
+// The cache stores the fetch PROMISE, set synchronously at call time. Caching
+// the resolved data had a late-write race: an invalidation landing between
+// fetch start and finish was silently overwritten by the stale result — which
+// then outlived the server's rescan cooldown. With the promise IN the cache,
+// deleting the key orphans any in-flight fetch: it can never write back.
+function loadCategoryFull(slug) {
   const key = cacheKey(slug);
   if (fullCache.has(key)) return fullCache.get(key);
   const enc = encodeURIComponent(slug);
-  const [shows, browse] = await Promise.all([
+  const p = Promise.all([
     get(`/library/shows?category=${enc}`),
     get(`/library/browse?category=${enc}&exclude_episodes=1&all=1`),
-  ]);
-  const data = {
-    shows: shows || [],
-    items: (browse && browse.items) || [],
-  };
-  data.cards = toCards(data.shows, data.items);
-  fullCache.set(key, data);
-  return data;
+  ]).then(([shows, browse]) => {
+    const data = {
+      shows: shows || [],
+      items: (browse && browse.items) || [],
+    };
+    data.cards = toCards(data.shows, data.items);
+    return data;
+  });
+  fullCache.set(key, p);
+  p.catch(() => {
+    // Never cache a failure — but only clear OUR entry, not a successor's.
+    if (fullCache.get(key) === p) fullCache.delete(key);
+  });
+  return p;
 }
 
 // Home shelves want only a handful per category — a light capped fetch, never
@@ -226,18 +238,31 @@ function CategoryGrid({ category }) {
     const enc = encodeURIComponent(category);
     let timer;
     let stopped = false;
+    // Cap the chain (~2 min): a folder wedged in 'scanning' must not turn
+    // every open tab into an indefinite 20-req/min poller.
+    let attempts = 0;
+    const MAX_POLLS = 40;
     const poll = async () => {
       if (stopped || gen !== genRef.current) return;
       try {
         const s = await get(`/library/categories/${enc}/scan-status`);
         if (stopped || gen !== genRef.current) return;
         if (s && s.scanning) {
-          timer = setTimeout(poll, 3000);
+          if (++attempts < MAX_POLLS) timer = setTimeout(poll, 3000);
           return;
         }
+        // Settled. The rescan may have deleted + reinserted rows onto
+        // recycled ids, so stale id-keyed thumbs must go too — and bumping
+        // the generation kills any still-in-flight pre-scan state write
+        // from this mount's initial load.
         fullCache.delete(cacheKey(category));
+        invalidateThumbCache();
+        const myGen = ++genRef.current;
         const d = await loadCategoryFull(category);
-        if (!stopped && gen === genRef.current) setData(d);
+        if (!stopped && myGen === genRef.current) {
+          setData(d);
+          setLoading(false);
+        }
       } catch {
         /* best-effort — the manual Scan button in Settings still exists */
       }

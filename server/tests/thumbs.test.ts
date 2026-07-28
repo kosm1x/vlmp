@@ -200,10 +200,14 @@ describe("sweepLegacyThumbs", () => {
     writeFileSync(join(thumbs, "7.fail"), "");
     const kept = thumbFile(cfg, "/m/a.mp4");
     writeFileSync(kept, "new");
+    // A 16-hex path key that happens to be all digits (~1 in 1900 thumbs)
+    // must NOT be treated as a legacy id — \d+ would delete it every boot.
+    writeFileSync(join(thumbs, "1234567890123456.jpg"), "hash-key");
     expect(await sweepLegacyThumbs(cfg)).toBe(2);
     expect(existsSync(join(thumbs, "42.jpg"))).toBe(false);
     expect(existsSync(join(thumbs, "7.fail"))).toBe(false);
     expect(existsSync(kept)).toBe(true);
+    expect(existsSync(join(thumbs, "1234567890123456.jpg"))).toBe(true);
   });
 });
 

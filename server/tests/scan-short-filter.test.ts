@@ -40,15 +40,19 @@ afterEach(() => {
 });
 
 describe("insert-time short filter", () => {
-  it("drops a loose short video, keeps a numbered lesson of the same length", async () => {
+  it("drops loose short videos, keeps a grouped numbered lesson", async () => {
     const root = mkdtempSync(join(tmpdir(), "vlmp-shortins-"));
     try {
       mkdirSync(join(root, "Course"));
       writeFileSync(join(root, "Course", "01 - Welcome.mp4"), "x");
       writeFileSync(join(root, "sample.mp4"), "x");
+      // A dotted numeric release prefix parses as a number — but at the
+      // library ROOT (no group) it is NOT sequence evidence, so the sample
+      // filter still applies. Only grouped numbered files are exempt.
+      writeFileSync(join(root, "300.2006.720P.BRRIP.mkv"), "x");
       const folder = addLibraryFolder(db, root, "education");
       const result = await scanLibraryFolder(db, folder, scanConfig);
-      expect(result.skippedShort).toBe(1);
+      expect(result.skippedShort).toBe(2);
       expect(result.added).toBe(1);
       const rows = db
         .prepare("SELECT title, duration FROM media_items")

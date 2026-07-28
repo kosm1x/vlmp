@@ -58,7 +58,9 @@ export async function sweepLegacyThumbs(config: Config): Promise<number> {
   }
   let removed = 0;
   for (const name of names) {
-    if (!/^\d+\.(jpg|fail)$/.test(name)) continue;
+    // 1-15 digits only: a 16-hex path key is all-decimal for ~1 in 1900
+    // thumbs, and \d+ would delete those valid files on every boot.
+    if (!/^\d{1,15}\.(jpg|fail)$/.test(name)) continue;
     try {
       await unlink(join(thumbDir(config), name));
       removed++;

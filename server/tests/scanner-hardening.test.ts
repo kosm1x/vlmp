@@ -194,16 +194,18 @@ describe("discoverMedia — symlinks, cycles, extensions", () => {
   });
 
   // Dirent reflects lstat, so symlinks are neither isFile() nor
-  // isDirectory() — before the fix they were silently invisible.
+  // isDirectory() — before the fix they were silently invisible. Links
+  // pointing INSIDE the tree are skipped (the real path is canonical);
+  // links pointing outside are followed.
   it.skipIf(process.platform === "win32")(
-    "follows symlinked files and directories, terminating on cycles",
+    "follows external symlinks, skips internal aliases, terminates on cycles",
     async () => {
       writeFileSync(join(root, "plain.mkv"), "x");
       mkdirSync(join(root, "sub"));
       writeFileSync(join(root, "sub", "inner.mkv"), "x");
-      // Symlinked file inside the tree.
+      // Symlinked file inside the tree: skipped — inner.mkv is canonical.
       symlinkSync(join(root, "sub", "inner.mkv"), join(root, "alias.mkv"));
-      // Symlinked directory pointing OUTSIDE the tree.
+      // Symlinked directory pointing OUTSIDE the tree: followed.
       writeFileSync(join(external, "ext.mp4"), "x");
       symlinkSync(external, join(root, "extdir"));
       // A cycle back to the root — must terminate, not recurse forever.
@@ -213,13 +215,43 @@ describe("discoverMedia — symlinks, cycles, extensions", () => {
 
       const found = await discoverMedia(root);
       expect(found.map((f) => f.path).sort()).toEqual([
-        join(root, "alias.mkv"),
         join(root, "extdir", "ext.mp4"),
         join(root, "plain.mkv"),
         join(root, "sub", "inner.mkv"),
       ]);
     },
   );
+
+  // The identity-swap regression: with a global visited-set, a directory
+  // alias RACED its real directory by readdir order — whichever lost was
+  // absent from the walk, and the empty-trash prune then deleted its rows
+  // (cascading watch progress, likes, playlists). The real path must win
+  // regardless of whether the alias sorts before or after it.
+  it.skipIf(process.platform === "win32")(
+    "a directory alias never steals the real directory's identity",
+    async () => {
+      mkdirSync(join(root, "MMM-Real"));
+      writeFileSync(join(root, "MMM-Real", "movie.mkv"), "x");
+      for (const linkName of ["AAA-link", "ZZZ-link"]) {
+        symlinkSync(join(root, "MMM-Real"), join(root, linkName));
+        const found = await discoverMedia(root);
+        expect(found.map((f) => f.path)).toEqual([
+          join(root, "MMM-Real", "movie.mkv"),
+        ]);
+        rmSync(join(root, linkName));
+      }
+    },
+  );
+
+  it("stops descending at the depth cap instead of recursing forever", async () => {
+    let deep = root;
+    for (let i = 0; i < 40; i++) deep = join(deep, `d${i}`);
+    mkdirSync(deep, { recursive: true });
+    writeFileSync(join(deep, "buried.mkv"), "x");
+    writeFileSync(join(root, "shallow.mkv"), "x");
+    const found = await discoverMedia(root);
+    expect(found.map((f) => f.path)).toEqual([join(root, "shallow.mkv")]);
+  });
 });
 
 describe("ffprobe timeout", () => {

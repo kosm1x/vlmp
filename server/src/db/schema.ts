@@ -40,6 +40,10 @@ CREATE TABLE IF NOT EXISTS media_items (
   -- for files at the library root and for linked episodes (those group via
   -- tv_shows). Lets the category page mirror the on-disk folder structure.
   group_title TEXT,
+  -- Ordering twin of group_title (article-stripped, lowercased — same
+  -- normalization as sort_title). Raw folder names would sort "The Matrix
+  -- (1999)/" under T while loose titles sort article-stripped.
+  group_sort_title TEXT,
   group_position INTEGER,
   year INTEGER,
   description TEXT,
@@ -278,6 +282,7 @@ export function initSchema(db: Database.Database): void {
   // Folder-grouping display columns; existing rows are backfilled by the
   // rescan reclassification pass, so NULL defaults are correct here.
   addColumnIfMissing(db, "media_items", "group_title", "TEXT");
+  addColumnIfMissing(db, "media_items", "group_sort_title", "TEXT");
   addColumnIfMissing(db, "media_items", "group_position", "INTEGER");
   db.exec(INDEXES);
   db.exec(

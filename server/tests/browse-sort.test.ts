@@ -167,15 +167,15 @@ describe("folder grouping — movie-kind subfolders keep their sequence", () => 
 
   beforeEach(() => {
     root = mkdtempSync(join(tmpdir(), "vlmp-groups-"));
-    // Two course folders plus a loose root file. In "B Course" the numbered
+    // Two course folders plus a loose root file. In "Beta Course" the numbered
     // order (Zeta before Apple) contradicts the alphabetical order — the one
     // case a flat title sort gets wrong.
-    mkdirSync(join(root, "A Course"));
-    writeFileSync(join(root, "A Course", "01 - Intro.mp4"), "x");
-    writeFileSync(join(root, "A Course", "02 - Deep Dive.mp4"), "x");
-    mkdirSync(join(root, "B Course"));
-    writeFileSync(join(root, "B Course", "01 - Zeta.mp4"), "x");
-    writeFileSync(join(root, "B Course", "02 - Apple.mp4"), "x");
+    mkdirSync(join(root, "Alpha Course"));
+    writeFileSync(join(root, "Alpha Course", "01 - Intro.mp4"), "x");
+    writeFileSync(join(root, "Alpha Course", "02 - Deep Dive.mp4"), "x");
+    mkdirSync(join(root, "Beta Course"));
+    writeFileSync(join(root, "Beta Course", "01 - Zeta.mp4"), "x");
+    writeFileSync(join(root, "Beta Course", "02 - Apple.mp4"), "x");
     writeFileSync(join(root, "Standalone Lecture.mp4"), "x");
   });
 
@@ -191,15 +191,15 @@ describe("folder grouping — movie-kind subfolders keep their sequence", () => 
       all: true,
     }).items;
     expect(rows.map((r) => r.title)).toEqual([
-      "Intro", // A Course, position 1
-      "Deep Dive", // A Course, position 2
-      "Zeta", // B Course, position 1 — beats alphabetical
-      "Apple", // B Course, position 2
+      "Intro", // Alpha Course, position 1
+      "Deep Dive", // Alpha Course, position 2
+      "Zeta", // Beta Course, position 1 — beats alphabetical
+      "Apple", // Beta Course, position 2
       "Standalone Lecture",
     ]);
-    expect(rows[0].group_title).toBe("A Course");
+    expect(rows[0].group_title).toBe("Alpha Course");
     expect(rows[0].group_position).toBe(1);
-    expect(rows[3].group_title).toBe("B Course");
+    expect(rows[3].group_title).toBe("Beta Course");
     expect(rows[3].group_position).toBe(2);
     expect(rows[4].group_title).toBeNull();
   });
@@ -215,7 +215,7 @@ describe("folder grouping — movie-kind subfolders keep their sequence", () => 
       includeHidden: true,
       all: true,
     }).items;
-    const aCourse = rows.filter((r) => r.group_title === "A Course");
+    const aCourse = rows.filter((r) => r.group_title === "Alpha Course");
     expect(aCourse).toHaveLength(2);
     expect(aCourse.map((r) => r.group_position)).toEqual([1, 2]);
   });
@@ -234,6 +234,34 @@ describe("folder grouping — movie-kind subfolders keep their sequence", () => 
       )
       .get() as { c: number };
     expect(healed.c).toBe(4); // both courses; the loose root file stays NULL
+  });
+
+  it("a 'The …' movie folder sorts under its stripped title, not under T", async () => {
+    const movieRoot = mkdtempSync(join(tmpdir(), "vlmp-articles-"));
+    try {
+      mkdirSync(join(movieRoot, "The Matrix (1999)"));
+      writeFileSync(join(movieRoot, "The Matrix (1999)", "Part A.mkv"), "x");
+      writeFileSync(join(movieRoot, "The Matrix (1999)", "Part B.mkv"), "x");
+      writeFileSync(join(movieRoot, "Avatar (2009).mkv"), "x");
+      writeFileSync(join(movieRoot, "Nomadland (2020).mkv"), "x");
+      const folder = addLibraryFolder(db, movieRoot, "movies");
+      await scanLibraryFolder(db, folder, scanConfig);
+      const rows = browseLibrary(db, {
+        category: "movies",
+        includeHidden: true,
+        all: true,
+      }).items;
+      // Raw "The Matrix (1999)" as the sort key would order it under T,
+      // AFTER Nomadland. group_sort_title strips the article like sort_title.
+      expect(rows.map((r) => r.title)).toEqual([
+        "Avatar",
+        "Part A",
+        "Part B",
+        "Nomadland",
+      ]);
+    } finally {
+      rmSync(movieRoot, { recursive: true, force: true });
+    }
   });
 
   it("linked episodes never carry group columns", async () => {

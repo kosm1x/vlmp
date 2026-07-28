@@ -38,6 +38,7 @@ export interface MediaItem {
   file_size: number | null;
   title: string;
   group_title: string | null;
+  group_sort_title: string | null;
   group_position: number | null;
   year: number | null;
   description: string | null;
@@ -170,6 +171,13 @@ function isShortSample(
   );
 }
 
+// One normalization for every sort key (leading article stripped, lowercase).
+// group_sort_title and sort_title MUST stay in lockstep — the browse ORDER BY
+// interleaves them via COALESCE.
+function normalizeSortTitle(title: string): string {
+  return title.replace(/^(?:the|a|an)\s+/i, "").toLowerCase();
+}
+
 export async function scanLibraryFolder(
   db: Database.Database,
   folder: LibraryFolder,
@@ -197,27 +205,32 @@ export async function scanLibraryFolder(
       kind: "movie" as const,
     };
     const insertMedia = db.prepare(
-      "INSERT OR IGNORE INTO media_items (library_folder_id, type, file_path, file_size, title, sort_title, group_title, group_position, year, codec_video, codec_audio, pix_fmt, probed_at, resolution_width, resolution_height, bitrate, duration, audio_tracks) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+      "INSERT OR IGNORE INTO media_items (library_folder_id, type, file_path, file_size, title, sort_title, group_title, group_sort_title, group_position, year, codec_video, codec_audio, pix_fmt, probed_at, resolution_width, resolution_height, bitrate, duration, audio_tracks) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
     );
     for (const file of files) {
       // Per-file isolation: one bad file (IO error, constraint surprise) must
       // not abort the scan and silently drop every file after it in the walk.
       try {
         const classified = classifyMedia(file.path, folder.path, category);
-        // A sequenced file — a series episode or a numbered course/collection
-        // entry — is deliberate content, never a stray "sample.mkv". The
-        // short-sample filter only exists for unsequenced release junk.
-        const sequenced =
-          classified.type === "episode" || classified.episodeNumber != null;
         // Folder-grouping display columns, non-episode rows only: an
         // episode's showTitle names its show (it groups via tv_shows).
         const groupTitle =
           classified.type === "episode" ? null : classified.showTitle;
+        const groupSortTitle =
+          groupTitle == null ? null : normalizeSortTitle(groupTitle);
         const groupPosition =
           classified.type === "episode" ? null : classified.episodeNumber;
+        // A sequenced file — a series episode, or a numbered entry INSIDE a
+        // course/collection folder — is deliberate content, never a stray
+        // "sample.mkv". The grouped requirement matters: any dotted numeric
+        // release prefix ("300.2006.720p...") parses as a number, so a bare
+        // numbered file at the library root is NOT sequence evidence.
+        const sequenced =
+          classified.type === "episode" ||
+          (groupTitle != null && groupPosition != null);
         const existing = db
           .prepare(
-            "SELECT id, type, title, year, duration, group_title, group_position FROM media_items WHERE file_path = ?",
+            "SELECT id, type, title, year, duration, group_title, group_sort_title, group_position FROM media_items WHERE file_path = ?",
           )
           .get(file.path) as
           | {
@@ -227,6 +240,7 @@ export async function scanLibraryFolder(
               year: number | null;
               duration: number | null;
               group_title: string | null;
+              group_sort_title: string | null;
               group_position: number | null;
             }
           | undefined;
@@ -255,6 +269,7 @@ export async function scanLibraryFolder(
             classified,
             folder,
             groupTitle,
+            groupSortTitle,
             groupPosition,
           );
           continue;
@@ -274,9 +289,7 @@ export async function scanLibraryFolder(
           skippedShort++;
           continue;
         }
-        const sortTitle = classified.title
-          .replace(/^(?:the|a|an)\s+/i, "")
-          .toLowerCase();
+        const sortTitle = normalizeSortTitle(classified.title);
         const info = insertMedia.run(
           folder.id,
           classified.type,
@@ -285,6 +298,7 @@ export async function scanLibraryFolder(
           classified.title,
           sortTitle,
           groupTitle,
+          groupSortTitle,
           groupPosition,
           classified.year,
           probe?.codecVideo || null,
@@ -549,12 +563,14 @@ function reclassifyExistingItem(
     title: string;
     year: number | null;
     group_title: string | null;
+    group_sort_title: string | null;
     group_position: number | null;
   },
   filePath: string,
   classified: ClassifiedMedia,
   folder: LibraryFolder,
   groupTitle: string | null,
+  groupSortTitle: string | null,
   groupPosition: number | null,
 ): void {
   // Any parse difference (not just a type flip) gets re-derived: classifier
@@ -567,19 +583,19 @@ function reclassifyExistingItem(
     existing.title !== classified.title ||
     existing.year !== classified.year ||
     existing.group_title !== groupTitle ||
+    existing.group_sort_title !== groupSortTitle ||
     existing.group_position !== groupPosition
   ) {
-    const sortTitle = classified.title
-      .replace(/^(?:the|a|an)\s+/i, "")
-      .toLowerCase();
+    const sortTitle = normalizeSortTitle(classified.title);
     db.prepare(
-      "UPDATE media_items SET type = ?, title = ?, sort_title = ?, year = ?, group_title = ?, group_position = ?, updated_at = unixepoch() WHERE id = ?",
+      "UPDATE media_items SET type = ?, title = ?, sort_title = ?, year = ?, group_title = ?, group_sort_title = ?, group_position = ?, updated_at = unixepoch() WHERE id = ?",
     ).run(
       classified.type,
       classified.title,
       sortTitle,
       classified.year,
       groupTitle,
+      groupSortTitle,
       groupPosition,
       existing.id,
     );
@@ -668,12 +684,16 @@ export function browseLibrary(
     ? []
     : [options.limit || 50, options.offset || 0];
   // Grouped rows (a course/collection subfolder) must come out clustered and
-  // in their numbered sequence, interleaved alphabetically with loose titles;
-  // within a group, unnumbered files fall back to title order. Search results
-  // stay a plain title sort — group interleaving would look random there.
+  // in their numbered sequence, interleaved alphabetically with loose titles
+  // (group_sort_title carries the same article-strip/lowercase normalization
+  // as sort_title, so "The Matrix (1999)/" sorts under M, not T); within a
+  // group, unnumbered files fall back to title order, and mi.id breaks the
+  // final tie so LIMIT/OFFSET pagination can never duplicate or drop a row.
+  // Search results stay a plain title sort — group interleaving would look
+  // random there.
   const orderBy = options.search
-    ? "ORDER BY mi.sort_title ASC"
-    : "ORDER BY COALESCE(mi.group_title, mi.sort_title) COLLATE NOCASE ASC, mi.group_title IS NULL, mi.group_position IS NULL, mi.group_position ASC, mi.sort_title ASC";
+    ? "ORDER BY mi.sort_title ASC, mi.id ASC"
+    : "ORDER BY COALESCE(mi.group_sort_title, mi.sort_title) ASC, mi.group_title IS NULL, mi.group_position IS NULL, mi.group_position ASC, mi.sort_title ASC, mi.id ASC";
   const items = db
     .prepare(
       `SELECT mi.*, ${likedCol} FROM media_items mi LEFT JOIN library_folders lf ON mi.library_folder_id = lf.id ${where} ${orderBy} ${limitClause}`,

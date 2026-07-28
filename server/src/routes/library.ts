@@ -287,20 +287,23 @@ export function registerLibraryRoutes(
   const runBackgroundScan = (
     folder: LibraryFolder,
     log: FastifyRequest["log"],
-  ): void => {
-    scanLibraryFolder(db, folder, config).catch((err) => {
-      log.error({ err, folder_id: folder.id }, "background scan failed");
-      // scanLibraryFolder sets 'error' itself before rethrowing; this covers
-      // a reject before its try block so the claim can't stick as 'scanning'.
-      try {
-        db.prepare(
-          "UPDATE library_folders SET scan_status = 'error' WHERE id = ? AND scan_status = 'scanning'",
-        ).run(folder.id);
-      } catch {
-        /* status reset is best-effort */
-      }
-    });
-  };
+  ): Promise<void> =>
+    scanLibraryFolder(db, folder, config).then(
+      () => undefined,
+      (err) => {
+        log.error({ err, folder_id: folder.id }, "background scan failed");
+        // scanLibraryFolder sets 'error' itself before rethrowing; this
+        // covers a reject before its try block so the claim can't stick as
+        // 'scanning'.
+        try {
+          db.prepare(
+            "UPDATE library_folders SET scan_status = 'error' WHERE id = ? AND scan_status = 'scanning'",
+          ).run(folder.id);
+        } catch {
+          /* status reset is best-effort */
+        }
+      },
+    );
 
   app.post<{ Params: { id: string } }>(
     "/admin/folders/:id/scan",
@@ -320,7 +323,7 @@ export function registerLibraryRoutes(
         .run(id);
       if (claimed.changes === 0)
         return reply.code(409).send({ error: "Scan already running" });
-      runBackgroundScan(folder, request.log);
+      void runBackgroundScan(folder, request.log);
       return reply.code(202).send({ folder_id: id, status: "scanning" });
     },
   );
@@ -353,24 +356,33 @@ export function registerLibraryRoutes(
           `SELECT * FROM library_folders WHERE category = ?${admin ? "" : " AND is_visible = 1"}`,
         )
         .all(slug) as LibraryFolder[];
-      let started = 0;
+      const claimed: LibraryFolder[] = [];
       const now = Date.now();
       for (const folder of folders) {
         if (now - (lastAutoRescan.get(folder.id) ?? 0) < cooldownMs) continue;
         // Same atomic claim as the admin route — never two scans of a folder.
-        const claimed = db
+        const claim = db
           .prepare(
             "UPDATE library_folders SET scan_status = 'scanning' WHERE id = ? AND scan_status != 'scanning'",
           )
           .run(folder.id);
-        if (claimed.changes === 0) continue;
+        if (claim.changes === 0) continue;
         lastAutoRescan.set(folder.id, now);
-        started++;
-        runBackgroundScan(folder, request.log);
+        claimed.push(folder);
+      }
+      // SEQUENTIAL on purpose: a multi-folder category must not fan out N
+      // concurrent walks + ffprobe chains from one page view. Claims were
+      // all taken above, so a later folder can't be double-started while it
+      // waits its turn. runBackgroundScan never rejects.
+      if (claimed.length > 0) {
+        void (async () => {
+          for (const folder of claimed)
+            await runBackgroundScan(folder, request.log);
+        })();
       }
       return {
-        started,
-        scanning: started > 0 || scanningInCategory(slug, admin),
+        started: claimed.length,
+        scanning: claimed.length > 0 || scanningInCategory(slug, admin),
       };
     },
   );
